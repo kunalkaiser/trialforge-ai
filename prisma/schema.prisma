@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Audit {
+  id        String   @id @default(uuid())
+  tenantId  String
+  studyId   String
+  action    String
+  before    String?  // SQLite fix
+  after     String
+  userId    String
+  role      String
+  timestamp DateTime @default(now())
+  signature String?
+}
+
+model CSR {
+  id        String   @id @default(uuid())
+  tenantId  String
+  studyId   String
+  version   Int
+  content   String   // SQLite fix
+  status    String   @default("draft")
+  locked    Boolean  @default(false)
+}
