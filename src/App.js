@@ -474,28 +474,15 @@ async function lookupRxNorm(drug) { try { const d = await (await fetch(`https://
 async function lookupLOINC(term) { try { const d = await (await fetch(`https://clinicaltables.nlm.nih.gov/api/loinc_items/v3/search?terms=${encodeURIComponent(term)}&maxList=3&df=LOINC_NUM,LONG_COMMON_NAME`)).json(); return (d[3] || []).map(([code, name]) => ({ code, name })); } catch { return []; } }
 async function cohdFind(name) { try { const d = await (await fetch(`https://cohd.io/api/omop/findConceptIDs?conceptName=${encodeURIComponent(name)}&datasetId=1`)).json(); return d.results || []; } catch { return []; } }
 async function cohdFreq(id) { try { const d = await (await fetch(`https://cohd.io/api/frequencies/singleConceptFreq?datasetId=1&conceptId=${id}`)).json(); return d.results?.[0] || null; } catch { return null; } }
-
-// ─── AI caller - MCP pharma backend ──────────────────────────────────────────
-async function ai(sys, usr, apiKey) {
-  const endpoint = "https://nursery-foam-dimensional-wallet.trycloudflare.com/mcp/v1/chat/completions";
-  
-  const headers = { 
-    "Content-Type": "application/json"
-  };
-  
-  const r = await fetch(endpoint, { 
-    method: "POST", 
-    headers, 
-    body: JSON.stringify({ 
-      model: "claude-sonnet-4-20250514", 
-      max_tokens: 3000, 
-      system: sys, 
-      messages: [{ role: "user", content: usr }] 
-    }) 
+async function ai(sys, usr) {
+  const r = await fetch("https://nursery-foam-dimensional-wallet.trycloudflare.com/mcp/v1/chat/completions", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514", max_tokens: 3000, 
+      system: sys, messages: [{role: "user", content: usr}]
+    })
   });
-  
   const d = await r.json();
-  if (d.error) throw new Error(d.error.message || "AI request failed");
   return d.choices?.[0]?.message?.content || "";
 }
 // ─── Agent runners ────────────────────────────────────────────────────────────
