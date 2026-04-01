@@ -1,5 +1,5 @@
 // ─── MCP Backend (Faeth Therapeutics $990/mo) ────────────────────────────────
-const MCP_URL = "https://nursery-foam-dimensional-wallet.trycloudflare.com";
+const MCP_URL = "https://indicate-past-description-realistic.trycloudflare.com";
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const STYLES = `
