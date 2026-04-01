@@ -77,4 +77,38 @@ app.post('/auth/tenant', (req, res) => {
   const token = jwt.sign({ tenantId, studyId, userId, role }, SECRET, { expiresIn: '24h' });
   res.json({ access_token: token });
 });
+app.post('/mcp/v1/chat/completions', async (req, res) => {
+  try {
+    const { model, messages, system, max_tokens = 3000 } = req.body;
+    
+    // Your pharma MCP logic here (or proxy to Claude)
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: model || 'claude-3-5-sonnet-20240620',
+        max_tokens,
+        system,
+        messages
+      })
+    });
+    
+    const data = await response.json();
+    
+    // OpenAI format for frontend
+    res.json({
+      choices: [{
+        message: {
+          content: data.content?.[0]?.text || 'Pharma response'
+        }
+      }]
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 app.listen(PORT, () => console.log(`TrialForge MCP v1.1 on http://localhost:${PORT}`));
