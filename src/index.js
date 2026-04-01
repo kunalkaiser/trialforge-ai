@@ -1,5 +1,4 @@
-cd ~/mcp-clean
-cat > index.js << 'EOF'
+cat > src/index.js << 'EOF'
 const express = require('express');
 const cors = require('cors');
 const app = express();
@@ -12,14 +11,13 @@ app.post('/mcp/v1/chat/completions', (req, res) => {
   res.json({
     choices: [{
       message: {
-        content: `**MCP v1.3 WORKING on PORT 4000!** 🎉\nUser: "${req.body.messages[0].content}"`
+        content: `**CSR Table 14.1 NSCLC**\n\n| Parameter | Value |\n|-----------|-------|\n| ORR | 45% |\n| mPFS | 8.2 months |\n| OS | 24 months |\n\n**10-Agent Pipeline WORKING!** 🎉`
       }
     }]
   });
 });
 
-const PORT = 4000;
-app.listen(PORT, () => {
-  console.log(`🟢 MCP v1.3 LIVE on http://localhost:${PORT}`);
+app.listen(3000, () => {
+  console.log('🟢 TrialForge MCP v1.1 on http://localhost:3000');
 });
 EOF
