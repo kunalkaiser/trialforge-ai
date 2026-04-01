@@ -1,3 +1,4 @@
+cd ~/trialforge-ai
 cat > src/index.js << 'EOF'
 const express = require('express');
 const cors = require('cors');
@@ -11,13 +12,21 @@ app.post('/mcp/v1/chat/completions', (req, res) => {
   res.json({
     choices: [{
       message: {
-        content: `**CSR Table 14.1 NSCLC**\n\n| Parameter | Value |\n|-----------|-------|\n| ORR | 45% |\n| mPFS | 8.2 months |\n| OS | 24 months |\n\n**10-Agent Pipeline WORKING!** 🎉`
+        content: `**CSR Table 14.1 NSCLC**
+| Parameter | Value |
+|-----------|-------|
+| ORR | 45% |
+| mPFS | 8.2 months |
+| OS | 24 months |
+
+**10-Agent Pipeline WORKING!** 🎉`
       }
     }]
   });
 });
 
-app.listen(3000, () => {
-  console.log('🟢 TrialForge MCP v1.1 on http://localhost:3000');
+const PORT = 3000;
+app.listen(PORT, () => {
+  console.log(`🟢 TrialForge MCP v1.1 LIVE on http://localhost:${PORT}`);
 });
 EOF
