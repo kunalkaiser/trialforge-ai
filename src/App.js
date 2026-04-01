@@ -486,8 +486,10 @@ async function cohdFreq(id) { try { const d = await (await fetch(`https://cohd.i
 async function ai(sys, usr, apiKey) {
   const key = apiKey || ENV_KEY;
   const isLocal = typeof window !== "undefined" && window.location.hostname === "localhost";
-  const endpoint = isLocal ? "https://api.anthropic.com/v1/messages" : "/api/claude";
-  const headers = { "Content-Type": "application/json", ...(isLocal && key ? { "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" } : {}) };
+  const endpoint = isLocal ? "https://nursery-foam-dimensional-wallet.trycloudflare.com/mcp/v1/chat/completions" : "https://nursery-foam-dimensional-wallet.trycloudflare.com/mcp/v1/chat/completions";
+// NEW (MCP - no API key needed):
+const headers = { 
+  "Content-Type": "application/json"
   const r = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 3000, system: sys, messages: [{ role: "user", content: usr }] }) });
   const d = await r.json();
   if (d.error) throw new Error(d.error.message || "AI request failed");
