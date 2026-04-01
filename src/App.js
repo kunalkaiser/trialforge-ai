@@ -475,18 +475,14 @@ async function lookupLOINC(term) { try { const d = await (await fetch(`https://c
 async function cohdFind(name) { try { const d = await (await fetch(`https://cohd.io/api/omop/findConceptIDs?conceptName=${encodeURIComponent(name)}&datasetId=1`)).json(); return d.results || []; } catch { return []; } }
 async function cohdFreq(id) { try { const d = await (await fetch(`https://cohd.io/api/frequencies/singleConceptFreq?datasetId=1&conceptId=${id}`)).json(); return d.results?.[0] || null; } catch { return null; } }
 
-// ─── AI caller - proxy-aware ──────────────────────────────────────────────────
+// ─── AI caller - MCP pharma backend ──────────────────────────────────────────
 async function ai(sys, usr, apiKey) {
-  const key = apiKey || ENV_KEY;
-  const isLocal = typeof window !== "undefined" && window.location.hostname === "localhost";
   const endpoint = "https://nursery-foam-dimensional-wallet.trycloudflare.com/mcp/v1/chat/completions";
   
-  // FIXED: Complete headers object + missing closing brace
   const headers = { 
     "Content-Type": "application/json"
   };
   
-  // FIXED: Complete fetch call
   const r = await fetch(endpoint, { 
     method: "POST", 
     headers, 
