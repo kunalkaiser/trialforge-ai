@@ -475,7 +475,7 @@ async function lookupLOINC(term) { try { const d = await (await fetch(`https://c
 async function cohdFind(name) { try { const d = await (await fetch(`https://cohd.io/api/omop/findConceptIDs?conceptName=${encodeURIComponent(name)}&datasetId=1`)).json(); return d.results || []; } catch { return []; } }
 async function cohdFreq(id) { try { const d = await (await fetch(`https://cohd.io/api/frequencies/singleConceptFreq?datasetId=1&conceptId=${id}`)).json(); return d.results?.[0] || null; } catch { return null; } }
 async function ai(sys, usr) {
-  const r = await fetch("https://nursery-foam-dimensional-wallet.trycloudflare.com/mcp/v1/chat/completions", {
+  const r = await fetch("https://indicate-past-description-realistic.trycloudflare.com/mcp/v1/chat/completions", {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514", max_tokens: 3000, 
