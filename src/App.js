@@ -1,12 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import pptxgen from "pptxgenjs";
-import { Document, Packer, Paragraph, TextRun } from "docx";
-import { saveAs } from "file-saver";
-
-// ─── Security note ────────────────────────────────────────────────────────────
-// In production, move all /v1/messages calls to a backend proxy (see api/claude.js).
-// The key below is only used as a local-dev fallback; it must NOT be set in Vercel env vars.
-const ENV_KEY = typeof process !== "undefined" && process.env?.REACT_APP_ANTHROPIC_API_KEY;
+// ─── MCP Backend (Faeth Therapeutics $990/mo) ────────────────────────────────
+const MCP_URL = "https://nursery-foam-dimensional-wallet.trycloudflare.com";
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const STYLES = `
