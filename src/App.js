@@ -1,5 +1,5 @@
 // ─── MCP Backend (Faeth Therapeutics $990/mo) ────────────────────────────────
-const MCP_URL = "https://indicate-past-description-realistic.trycloudflare.com";
+const MCP_URL = "https://sep-challenging-cologne-wales.trycloudflare.com/mcp/v1/chat/completions";
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const STYLES = `
