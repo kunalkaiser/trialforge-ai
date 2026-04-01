@@ -1,3 +1,4 @@
+cd ~/mcp-clean
 cat > index.js << 'EOF'
 const express = require('express');
 const cors = require('cors');
