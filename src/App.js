@@ -1,5 +1,11 @@
-// ─── MCP Backend (Faeth Therapeutics $990/mo) ────────────────────────────────
-const MCP_URL = "https://sep-challenging-cologne-wales.trycloudflare.com/mcp/v1/chat/completions";
+import React, { useEffect, useRef, useState } from "react";
+import { Document, Packer, Paragraph, TextRun } from "docx";
+import { saveAs } from "file-saver";
+import PptxGenJS from "pptxgenjs";
+
+const ENV_KEY = process.env.REACT_APP_ANTHROPIC_API_KEY || "";
+const PROXY_URL = process.env.REACT_APP_PROXY_URL || "/api/claude";
+const DEFAULT_MODEL = "claude-sonnet-4-20250514";
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const STYLES = `
@@ -261,7 +267,11 @@ Rules: Separate RCT from observational evidence. Never invent citations or effec
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function safeJsonParse(text, fallback) {
-  try { return JSON.parse(text.replace(/```json|```/g, "").trim()); } catch { return fallback; }
+  try {
+    return JSON.parse(String(text || "").replace(/```json|```/g, "").trim());
+  } catch {
+    return fallback;
+  }
 }
 function truncate(text, n = 1200) { return text ? (text.length > n ? text.slice(0, n) + "..." : text) : ""; }
 function getRequestText(promptText, form) {
@@ -283,21 +293,12 @@ function shortTitle(text, fallback = "TrialForge") {
   return base.split(/[.!?;\n]/)[0].slice(0, 90) || fallback;
 }
 function splitCSVLine(line) {
-  const out = [];
-  let cur = "";
-  let inQuotes = false;
+  const out = []; let cur = ""; let inQuotes = false;
   for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    const next = line[i + 1];
-    if (ch === '"') {
-      if (inQuotes && next === '"') { cur += '"'; i++; }
-      else inQuotes = !inQuotes;
-    } else if (ch === ',' && !inQuotes) {
-      out.push(cur);
-      cur = "";
-    } else {
-      cur += ch;
-    }
+    const ch = line[i], next = line[i + 1];
+    if (ch === '"') { if (inQuotes && next === '"') { cur += '"'; i++; } else inQuotes = !inQuotes; }
+    else if (ch === ',' && !inQuotes) { out.push(cur); cur = ""; }
+    else { cur += ch; }
   }
   out.push(cur);
   return out;
@@ -317,29 +318,16 @@ function parseCSVText(text) {
 const parseSDTMADaM = async (sdtmFile, adamFile) => {
   if (!sdtmFile || !adamFile) return { success: false, error: "Upload both SDTM and ADaM files" };
   try {
-    const dmText = await sdtmFile.text();
-    const dm = parseCSVText(dmText);
-    const adamText = await adamFile.text();
-    const adam = parseCSVText(adamText);
-    if (dm.length === 0) return { success: false, error: "Empty SDTM DM dataset" };
-
+    const dm = parseCSVText(await sdtmFile.text());
+    const adam = parseCSVText(await adamFile.text());
+    if (!dm.length) return { success: false, error: "Empty SDTM DM dataset" };
     const nTotal = dm.length;
     const trtN = dm.filter(r => (r.ARMCD === 'TRT' || r.ARM === 'Treatment' || r.ARMCD === 'EXP')).length;
     const ctrlN = nTotal - trtN;
-
     const ageMean = dm.reduce((sum, r) => sum + parseFloat(r.AGE || 0), 0) / nTotal;
     const femalePct = (dm.filter(r => String(r.SEX || '').toUpperCase() === 'F').length / nTotal) * 100;
-
-    const seriousAe = adam.filter(r =>
-      String(r.AESEV || '').includes('3') ||
-      String(r.AESEV || '').toLowerCase().includes('serious')
-    ).length;
-
-    const deaths = adam.filter(r =>
-      String(r.AEOUT || '').toLowerCase().includes('death') ||
-      String(r.FATAL || '').toUpperCase() === 'Y'
-    ).length;
-
+    const seriousAe = adam.filter(r => String(r.AESEV || '').includes('3') || String(r.AESEV || '').toLowerCase().includes('serious')).length;
+    const deaths = adam.filter(r => String(r.AEOUT || '').toLowerCase().includes('death') || String(r.FATAL || '').toUpperCase() === 'Y').length;
     return {
       success: true,
       nTotal,
@@ -354,10 +342,7 @@ const parseSDTMADaM = async (sdtmFile, adamFile) => {
 };
 
 function computeFeasibility(ctCount, pmCount, cohdPts, matchedPairs) {
-  const total = Math.round(
-    Math.min(ctCount / 10, 1) * 25 + Math.min(pmCount / 8, 1) * 20 +
-    Math.min(cohdPts / 5000, 1) * 30 + Math.min(matchedPairs / 500, 1) * 25
-  );
+  const total = Math.round(Math.min(ctCount / 10, 1) * 25 + Math.min(pmCount / 8, 1) * 20 + Math.min(cohdPts / 5000, 1) * 30 + Math.min(matchedPairs / 500, 1) * 25);
   return {
     total,
     grade: total >= 80 ? "Excellent" : total >= 60 ? "Good" : total >= 40 ? "Moderate" : "Limited",
@@ -403,19 +388,17 @@ function buildARS(stats) {
   };
 }
 function validateCSRNumbers(stats, ars) {
-  const checks = [];
-  checks.push({ label: "N total", pass: ars.Table_14_1.n === stats.nTotal, expected: stats.nTotal, actual: ars.Table_14_1.n });
-  checks.push({ label: "SAE count", pass: ars.Safety.sae_count === stats.safety.seriousAe, expected: stats.safety.seriousAe, actual: ars.Safety.sae_count });
-  checks.push({ label: "Death count", pass: ars.Safety.deaths === stats.safety.deaths, expected: stats.safety.deaths, actual: ars.Safety.deaths });
-  checks.push({ label: "PFS events", pass: ars.Efficacy.events === stats.efficacy.events, expected: stats.efficacy.events, actual: ars.Efficacy.events });
-  return checks;
+  return [
+    { label: "N total", pass: ars.Table_14_1.n === stats.nTotal, expected: stats.nTotal, actual: ars.Table_14_1.n },
+    { label: "SAE count", pass: ars.Safety.sae_count === stats.safety.seriousAe, expected: stats.safety.seriousAe, actual: ars.Safety.sae_count },
+    { label: "Death count", pass: ars.Safety.deaths === stats.safety.deaths, expected: stats.safety.deaths, actual: ars.Safety.deaths },
+    { label: "PFS events", pass: ars.Efficacy.events === stats.efficacy.events, expected: stats.efficacy.events, actual: ars.Efficacy.events },
+  ];
 }
 function buildValidationReport({ csrText, stats, ars }) {
   const text = String(csrText || "");
-  const lower = text.toLowerCase();
   const checks = [];
   const add = (label, pass, expected = "", actual = "") => checks.push({ label, pass, expected, actual });
-
   add("18.2 Synopsis section", /##\s*18\.2\s*synopsis/i.test(text), "Present", /##\s*18\.2\s*synopsis/i.test(text) ? "Present" : "Missing");
   add("2.5 Clinical Overview section", /##\s*2\.5\s*clinical overview/i.test(text), "Present", /##\s*2\.5\s*clinical overview/i.test(text) ? "Present" : "Missing");
   add("Product Development Rationale", /###\s*2\.5\.1\s*product development rationale/i.test(text), "Present", /###\s*2\.5\.1\s*product development rationale/i.test(text) ? "Present" : "Missing");
@@ -424,16 +407,13 @@ function buildValidationReport({ csrText, stats, ars }) {
   add("Clinical Safety", /###\s*2\.5\.4\s*clinical safety/i.test(text), "Present", /###\s*2\.5\.4\s*clinical safety/i.test(text) ? "Present" : "Missing");
   add("Benefit/Risk Assessment", /###\s*2\.5\.5\s*benefit\/risk assessment/i.test(text), "Present", /###\s*2\.5\.5\s*benefit\/risk assessment/i.test(text) ? "Present" : "Missing");
   add("AI-generated watermark", /AI-GENERATED/i.test(text), "Present", /AI-GENERATED/i.test(text) ? "Present" : "Missing");
-
   if (stats?.nTotal != null) add("Total N included", text.includes(String(stats.nTotal)), String(stats.nTotal), text.includes(String(stats.nTotal)) ? "Found" : "Missing");
   if (stats?.safety?.seriousAe != null) add("SAE count included", text.includes(String(stats.safety.seriousAe)), String(stats.safety.seriousAe), text.includes(String(stats.safety.seriousAe)) ? "Found" : "Missing");
   if (stats?.safety?.deaths != null) add("Death count included", text.includes(String(stats.safety.deaths)), String(stats.safety.deaths), text.includes(String(stats.safety.deaths)) ? "Found" : "Missing");
   if (stats?.efficacy?.events != null) add("PFS events included", text.includes(String(stats.efficacy.events)), String(stats.efficacy.events), text.includes(String(stats.efficacy.events)) ? "Found" : "Missing");
-
   if (ars?.Table_14_1?.n != null) add("ARS trace: N", ars.Table_14_1.n === stats?.nTotal, stats?.nTotal, ars.Table_14_1.n);
   if (ars?.Safety?.sae_count != null) add("ARS trace: SAE", ars.Safety.sae_count === stats?.safety?.seriousAe, stats?.safety?.seriousAe, ars.Safety.sae_count);
   if (ars?.Safety?.deaths != null) add("ARS trace: Deaths", ars.Safety.deaths === stats?.safety?.deaths, stats?.safety?.deaths, ars.Safety.deaths);
-
   const passed = checks.filter((c) => c.pass).length;
   const total = checks.length || 1;
   const score = Math.round((passed / total) * 100);
@@ -445,7 +425,8 @@ function buildValidationReport({ csrText, stats, ars }) {
 async function fetchCT(queryText) {
   try {
     const q = new URLSearchParams({ query: queryText, pageSize: "12", format: "json" });
-    const data = await (await fetch(`https://clinicaltrials.gov/api/v2/studies?${q}`)).json();
+    const res = await fetch(`https://clinicaltrials.gov/api/v2/studies?${q}`);
+    const data = await res.json();
     return (data.studies || []).map((s) => {
       const p = s.protocolSection || {};
       return {
@@ -457,7 +438,9 @@ async function fetchCT(queryText) {
         sponsor: p.sponsorCollaboratorsModule?.leadSponsor?.name,
       };
     });
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 async function fetchPM(queryText) {
   try {
@@ -466,25 +449,49 @@ async function fetchPM(queryText) {
     const ids = sd.esearchresult?.idlist || [];
     if (!ids.length) return [];
     const dd = await (await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${ids.join(",")}&retmode=json`)).json();
-    return ids.map((id) => { const a = dd.result?.[id]; return a ? { title: a.title, source: a.source, year: (a.pubdate || "").split(" ")[0], pmid: a.uid } : null; }).filter(Boolean);
-  } catch { return []; }
+    return ids.map((id) => {
+      const a = dd.result?.[id];
+      return a ? { title: a.title, source: a.source, year: (a.pubdate || "").split(" ")[0], pmid: a.uid } : null;
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 async function lookupICD(term) { try { const d = await (await fetch(`https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search?terms=${encodeURIComponent(term)}&maxList=3&df=code,name`)).json(); return (d[3] || []).map(([code, name]) => ({ code, name })); } catch { return []; } }
 async function lookupRxNorm(drug) { try { const d = await (await fetch(`https://rxnav.nlm.nih.gov/REST/drugs.json?name=${encodeURIComponent(drug)}`)).json(); return (d?.drugGroup?.conceptGroup?.flatMap((g) => g.conceptProperties || []) || []).slice(0, 3).map((c) => ({ code: c.rxcui, name: c.name })); } catch { return []; } }
 async function lookupLOINC(term) { try { const d = await (await fetch(`https://clinicaltables.nlm.nih.gov/api/loinc_items/v3/search?terms=${encodeURIComponent(term)}&maxList=3&df=LOINC_NUM,LONG_COMMON_NAME`)).json(); return (d[3] || []).map(([code, name]) => ({ code, name })); } catch { return []; } }
 async function cohdFind(name) { try { const d = await (await fetch(`https://cohd.io/api/omop/findConceptIDs?conceptName=${encodeURIComponent(name)}&datasetId=1`)).json(); return d.results || []; } catch { return []; } }
 async function cohdFreq(id) { try { const d = await (await fetch(`https://cohd.io/api/frequencies/singleConceptFreq?datasetId=1&conceptId=${id}`)).json(); return d.results?.[0] || null; } catch { return null; } }
-async function ai(sys, usr) {
-  const r = await fetch(MCP_URL, { // ─── MCP Backend (Faeth Therapeutics $990/mo) ────────────────────────────────
-    method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514", max_tokens: 3000, 
-      system: sys, messages: [{role: "user", content: usr}]
-    })
-  });
-  const d = await r.json();
-  return d.choices?.[0]?.message?.content || "";
+
+function extractAiContent(payload) {
+  if (!payload) return "";
+  if (typeof payload === "string") return payload;
+  if (Array.isArray(payload.content)) {
+    return payload.content.map((part) => (typeof part === "string" ? part : (part?.text || part?.content || ""))).join("");
+  }
+  const choiceContent = payload?.choices?.[0]?.message?.content;
+  if (typeof choiceContent === "string") return choiceContent;
+  if (Array.isArray(choiceContent)) return choiceContent.map((part) => (typeof part === "string" ? part : (part?.text || ""))).join("");
+  return payload?.output_text || payload?.completion || payload?.text || payload?.message || payload?.result || "";
 }
+async function ai(sys, usr) {
+  const res = await fetch(PROXY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      model: DEFAULT_MODEL,
+      max_tokens: 3000,
+      system: sys,
+      prompt: usr,
+      messages: [{ role: "user", content: usr }],
+    }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Proxy error ${res.status}: ${truncate(text, 300)}`);
+  const parsed = safeJsonParse(text, null);
+  return parsed ? extractAiContent(parsed) : text;
+}
+
 // ─── Agent runners ────────────────────────────────────────────────────────────
 async function runNER(queryText) { const [icd, rxn, loinc] = await Promise.all([lookupICD(queryText), lookupRxNorm(queryText), lookupLOINC(queryText + " biomarker")]); return { icd, rxn, loinc }; }
 async function runCOHD(queryText) {
@@ -498,14 +505,33 @@ async function runCOHD(queryText) {
   return { totalPts, matchedPairs, hr: 0.74, hrCI: [0.61, 0.89], auc: 0.73, source: `COHD Columbia 5.3M pts - ${conceptInfo}`, cov: [{ name: "Age", smdpre: 0.38, smdpost: 0.04 }, { name: "Sex", smdpre: 0.21, smdpost: 0.02 }, { name: "Charlson comorbidity", smdpre: 0.44, smdpost: 0.06 }, { name: "Prior hospitalizations", smdpre: 0.29, smdpost: 0.03 }, { name: "Baseline medication", smdpre: 0.33, smdpost: 0.05 }] };
 }
 const EC_FALLBACK = { criteria: [{ name: "Age >= 18 years", type: "inclusion", feasibility: 0.92, safety: 0.40, power: 0.30, overall: 0.65 }, { name: "Confirmed diagnosis", type: "inclusion", feasibility: 0.85, safety: 0.60, power: 0.90, overall: 0.82 }, { name: "ECOG PS 0-2", type: "inclusion", feasibility: 0.70, safety: 0.75, power: 0.65, overall: 0.70 }, { name: "Adequate organ function", type: "inclusion", feasibility: 0.78, safety: 0.90, power: 0.55, overall: 0.73 }, { name: "Active serious infection", type: "exclusion", feasibility: 0.60, safety: 0.95, power: 0.40, overall: 0.68 }, { name: "Prior related therapy failure", type: "exclusion", feasibility: 0.50, safety: 0.70, power: 0.45, overall: 0.56 }], shapley: [{ criterion: "Age >= 18 years", shapley: 0.0312, recommendation: "Keep - broad" }, { criterion: "Confirmed diagnosis", shapley: 0.1847, recommendation: "Keep - critical" }, { criterion: "ECOG PS 0-2", shapley: 0.0921, recommendation: "Consider widening" }, { criterion: "Adequate organ function", shapley: 0.0634, recommendation: "Keep safety" }, { criterion: "Active serious infection", shapley: -0.0289, recommendation: "Keep exclusion" }, { criterion: "Prior related therapy failure", shapley: -0.0412, recommendation: "Review threshold" }] };
-async function runECOptimizer(queryText, context, apiKey) { const text = await ai(sys_ec, `Request: ${queryText}\nContext: ${truncate(context, 400)}`, apiKey); return safeJsonParse(text, EC_FALLBACK); }
+async function runECOptimizer(queryText, context) { const text = await ai(sys_ec, `Request: ${queryText}\nContext: ${truncate(context, 400)}`); return safeJsonParse(text, EC_FALLBACK); }
 const SG_FALLBACK = { text: "Subgroup analyses indicate heterogeneous treatment effects across key patient populations. All findings should be considered exploratory.", subgroups: [{ name: "Age < 65", n: 420, hr: 0.68, p: 0.023 }, { name: "Age >= 65", n: 380, hr: 0.81, p: 0.142 }, { name: "Female", n: 390, hr: 0.72, p: 0.041 }, { name: "Male", n: 410, hr: 0.77, p: 0.088 }, { name: "Low comorbidity", n: 310, hr: 0.65, p: 0.012 }, { name: "High comorbidity", n: 490, hr: 0.84, p: 0.201 }] };
-async function runSubgroup(queryText, cohdData, statsContext, apiKey) { const text = await ai(sys_subgroup, `Request: ${queryText}\nCOHD: ${JSON.stringify(cohdData || {}).slice(0, 300)}\nStats: ${truncate(statsContext, 300)}`, apiKey); return safeJsonParse(text, SG_FALLBACK); }
-async function runRegulatory(queryText, phase, statsContext, sampleN, apiKey) { return ai(sys_regulatory, `Request: ${queryText}\nPhase: ${phase}\nSample Size N=${sampleN?.total ?? "TBD"} (per arm: ${sampleN?.perArm ?? "TBD"})\nStats: ${truncate(statsContext, 500)}`, apiKey); }
+async function runSubgroup(queryText, cohdData, statsContext) { const text = await ai(sys_subgroup, `Request: ${queryText}\nCOHD: ${JSON.stringify(cohdData || {}).slice(0, 300)}\nStats: ${truncate(statsContext, 300)}`); return safeJsonParse(text, SG_FALLBACK); }
+async function runRegulatory(queryText, phase, statsContext, sampleN) { return ai(sys_regulatory, `Request: ${queryText}\nPhase: ${phase}\nSample Size N=${sampleN?.total ?? "TBD"} (per arm: ${sampleN?.perArm ?? "TBD"})\nStats: ${truncate(statsContext, 500)}`); }
 
 // ─── UI components ────────────────────────────────────────────────────────────
-function Rich({ text }) { if (!text) return null; const lines = String(text).split("\n"); const els = []; let items = []; const flush = () => { if (items.length) els.push(<ul key={`ul-${els.length}`} style={{ paddingLeft: 0, listStyle: "none", margin: "3px 0 10px" }}>{items}</ul>); items = []; }; const inline = (t) => t.split(/(\*\*.*?\*\*)/g).map((p, i) => i % 2 ? <strong key={i}>{p.replace(/\*\*/g, "")}</strong> : p); lines.forEach((line, i) => { if (!line.trim()) { flush(); els.push(<div key={`sp-${i}`} style={{ height: 5 }} />); return; } if (line.startsWith("## ")) { flush(); els.push(<h2 key={i} className="rich">{line.slice(3)}</h2>); return; } if (line.startsWith("### ")) { flush(); els.push(<h3 key={i} className="rich">{line.slice(4)}</h3>); return; } if (line.startsWith("- ")) { items.push(<li key={`li-${i}`}>{inline(line.slice(2))}</li>); return; } flush(); els.push(<p key={i} className="rich">{inline(line)}</p>); }); flush(); return <div className="rich">{els}</div>; }
-function SqlBlock({ code }) { if (!code) return null; const KWS = new Set(["SELECT","FROM","WHERE","JOIN","LEFT","INNER","WITH","AS","ON","AND","OR","NOT","IN","BETWEEN","GROUP","BY","ORDER","HAVING","LIMIT","UNION","DISTINCT","CASE","WHEN","THEN","ELSE","END","IS","NULL","COUNT","SUM","AVG","MIN","MAX"]); return <div className="code">{String(code).split("\n").map((line, i) => (<div key={i}>{line.trim().startsWith("--") ? <span className="cm">{line}</span> : line.split(/(\s+)/).map((w, j) => KWS.has(w.toUpperCase()) ? <span key={j} className="kw">{w}</span> : <span key={j}>{w}</span>)}</div>))}</div>; }
+function Rich({ text }) {
+  if (!text) return null;
+  const lines = String(text).split("\n");
+  const els = []; let items = [];
+  const flush = () => { if (items.length) els.push(<ul key={`ul-${els.length}`} style={{ paddingLeft: 0, listStyle: "none", margin: "3px 0 10px" }}>{items}</ul>); items = []; };
+  const inline = (t) => t.split(/(\*\*.*?\*\*)/g).map((p, i) => i % 2 ? <strong key={i}>{p.replace(/\*\*/g, "")}</strong> : p);
+  lines.forEach((line, i) => {
+    if (!line.trim()) { flush(); els.push(<div key={`sp-${i}`} style={{ height: 5 }} />); return; }
+    if (line.startsWith("## ")) { flush(); els.push(<h2 key={i} className="rich">{line.slice(3)}</h2>); return; }
+    if (line.startsWith("### ")) { flush(); els.push(<h3 key={i} className="rich">{line.slice(4)}</h3>); return; }
+    if (line.startsWith("- ")) { items.push(<li key={`li-${i}`}>{inline(line.slice(2))}</li>); return; }
+    flush(); els.push(<p key={i} className="rich">{inline(line)}</p>);
+  });
+  flush();
+  return <div className="rich">{els}</div>;
+}
+function SqlBlock({ code }) {
+  if (!code) return null;
+  const KWS = new Set(["SELECT","FROM","WHERE","JOIN","LEFT","INNER","WITH","AS","ON","AND","OR","NOT","IN","BETWEEN","GROUP","BY","ORDER","HAVING","LIMIT","UNION","DISTINCT","CASE","WHEN","THEN","ELSE","END","IS","NULL","COUNT","SUM","AVG","MIN","MAX"]);
+  return <div className="code">{String(code).split("\n").map((line, i) => (<div key={i}>{line.trim().startsWith("--") ? <span className="cm">{line}</span> : line.split(/(\s+)/).map((w, j) => KWS.has(w.toUpperCase()) ? <span key={j} className="kw">{w}</span> : <span key={j}>{w}</span>)}</div>))}</div>;
+}
 function SBadge({ s }) { if (s === "active") return <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 13, height: 13, border: "2px solid rgba(255,255,255,.3)", borderTopColor: "#00b899", borderRadius: "50%", display: "inline-block", animation: "spin .8s linear infinite" }} /><span style={{ fontSize: 10, color: "#00a082", fontWeight: 800 }}>Running</span></div>; if (s === "done") return <span style={{ fontSize: 10, color: "#00a082", fontWeight: 800, background: "#f0fdf9", padding: "2px 8px", borderRadius: 999, border: "1px solid #b2ece3" }}>Done</span>; return <span style={{ fontSize: 10, color: "#cbd5e0" }}>Idle</span>; }
 function KMCurve({ hr }) { const km = generateKM(hr); const W = 340, H = 180, PL = 40, PB = 30, PT = 10, PR = 20; const cW = W - PL - PR, cH = H - PB - PT; const toX = (t) => PL + (t / 12) * cW; const toY = (s) => PT + (1 - s) * cH; const pathFor = (pts) => pts.map((p, i) => `${i === 0 ? "M" : "L"}${toX(p.t).toFixed(1)},${toY(p.s).toFixed(1)}`).join(" "); return <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 340, display: "block", margin: "8px auto" }}>{[0, 0.25, 0.5, 0.75, 1].map((y) => <line key={y} x1={PL} y1={toY(y)} x2={W - PR} y2={toY(y)} stroke="#e2e8f0" strokeWidth="1" strokeDasharray="3,3" />)}<line x1={PL} y1={PT} x2={PL} y2={H - PB} stroke="#718096" strokeWidth="1.5" /><line x1={PL} y1={H - PB} x2={W - PR} y2={H - PB} stroke="#718096" strokeWidth="1.5" /><path d={pathFor(km.treated)} fill="none" stroke="#00b899" strokeWidth="2.5" /><path d={pathFor(km.control)} fill="none" stroke="#f87171" strokeWidth="2.5" strokeDasharray="5,3" /><text x={PL + 22} y={16} fontSize="9" fill="#0a8f6e" fontWeight="800">Treated</text><text x={PL + 85} y={16} fontSize="9" fill="#be123c" fontWeight="800">Control</text><text x={W / 2} y={H - 2} textAnchor="middle" fontSize="8" fill="#718096">Follow-up months</text><text x={10} y={H / 2} textAnchor="middle" fontSize="8" fill="#718096" transform={`rotate(-90,10,${H / 2})`}>Survival</text></svg>; }
 function ShapleyChart({ data }) { if (!data?.length) return null; const max = Math.max(...data.map((d) => Math.abs(d.shapley || 0)), 0.0001); return <div>{data.map((d, i) => <div key={i} style={{ marginBottom: 9 }}><div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, marginBottom: 3 }}><span style={{ color: "#1a2b4a", fontWeight: 800 }}>{d.criterion}</span><span style={{ color: d.shapley >= 0 ? "#00a082" : "#c05621", fontFamily: "monospace", fontSize: 9 }}>{(d.shapley || 0).toFixed(4)}</span></div><div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ flex: 1, height: 7, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}><div style={{ width: `${Math.abs(d.shapley) / max * 100}%`, height: "100%", background: d.shapley >= 0 ? "#00b899" : "#f87171", borderRadius: 999 }} /></div><span style={{ fontSize: 9, color: "#718096", width: 110, flexShrink: 0 }}>{d.recommendation}</span></div></div>)}</div>; }
@@ -575,8 +601,9 @@ function App() {
     if (!trialData.trim()) return setCsrResult("Enter trial data");
     if (!request.trim()) return setCsrResult("Enter a request first");
     setLoading(true);
+    setParseError("");
     try {
-      const response = await ai(sys_csr, `TrialForge CSR Generator\n\nREQUEST:\n${request}\n\nTRIAL DATA:\n${trialData}`, apiKey);
+      const response = await ai(sys_csr, `TrialForge CSR Generator\n\nREQUEST:\n${request}\n\nTRIAL DATA:\n${trialData}`);
       setCsrResult(response);
       setEditableCSR(response);
       const validation = buildValidationReport({ csrText: response, stats: csrStats, ars: arsData });
@@ -588,24 +615,31 @@ function App() {
 
   async function parseDatasets(sdtmFile, adamFile) {
     try {
-      const dmText = await sdtmFile.text(); const dm = parseCSVText(dmText);
-      const adamText = await adamFile.text(); const adam = parseCSVText(adamText);
+      const dm = parseCSVText(await sdtmFile.text());
+      const adam = parseCSVText(await adamFile.text());
       const ageMean = dm.length ? dm.reduce((sum, r) => sum + parseFloat(r.AGE || 0), 0) / dm.length : 0;
       const femalePct = dm.length ? (dm.filter(r => String(r.SEX || "").toUpperCase() === 'F').length / dm.length * 100).toFixed(1) : "0.0";
-      const saeCount = adam.filter(r => String(r.AESEV || "").toLowerCase() === '3' || String(r.AESEV || "").toLowerCase() === 'serious').length;
-      const deathCount = adam.filter(r => String(r.AEOUT || "").toLowerCase() === 'death').length;
+      const seriousAe = adam.filter(r => String(r.AESEV || "").toLowerCase() === '3' || String(r.AESEV || "").toLowerCase() === 'serious').length;
+      const deaths = adam.filter(r => String(r.AEOUT || "").toLowerCase() === 'death').length;
       const pfsEvents = adam.filter(r => String(r.PARAMCD || "").toUpperCase() === 'PFS' && parseFloat(r.AVALN || 0) > 0);
       const pfsMedian = pfsEvents.length ? (pfsEvents.reduce((sum, r) => sum + parseFloat(r.AVALN || 0), 0) / pfsEvents.length).toFixed(1) : 'N/A';
       const armTRT = dm.filter(r => String(r.ARMCD || "").toUpperCase() === 'TRT').length;
       const armCTRL = dm.filter(r => String(r.ARMCD || "").toUpperCase() === 'CTRL').length;
       const whitePct = dm.length ? (dm.filter(r => String(r.RACE || "").toUpperCase() === 'WHITE').length / dm.length * 100).toFixed(1) : "0.0";
-      return { nTotal: dm.length, armSizes: { TRT: armTRT, CTRL: armCTRL }, demoTable: { ageMean: ageMean.toFixed(1), femalePct, raceWhite: `${whitePct}%` }, safety: { saeCount, saeRate: dm.length ? (saeCount / dm.length * 100).toFixed(1) + '%' : '0.0%', deathCount }, efficacy: { pfsMedian, events: pfsEvents.length } };
+      return {
+        nTotal: dm.length,
+        armSizes: { TRT: armTRT, CTRL: armCTRL },
+        demographics: { ageMean: ageMean.toFixed(1), femalePct: `${femalePct}%`, raceWhite: `${whitePct}%` },
+        demoTable: { ageMean: ageMean.toFixed(1), femalePct, raceWhite: `${whitePct}%` },
+        safety: { seriousAe, saeCount: seriousAe, saeRate: dm.length ? (seriousAe / dm.length * 100).toFixed(1) + '%' : '0.0%', deaths },
+        efficacy: { pfsMedian, events: pfsEvents.length }
+      };
     } catch (e) { return { error: `Parse error: ${e.message}` }; }
   }
 
   const handleCSRWithData = async () => {
     if (!sdtmFile || !adamFile) { setCsrResult("Please upload both SDTM and ADaM CSV files."); return; }
-    setLoading(true); setCsrResult("Parsing SDTM/ADaM...");
+    setLoading(true); setCsrResult("Parsing SDTM/ADaM..."); setParseError("");
     const stats = await parseDatasets(sdtmFile, adamFile);
     if (stats.error) { setCsrResult(stats.error); setLoading(false); return; }
     const request = getRequestText(promptText, form);
@@ -616,7 +650,7 @@ function App() {
     const csrData = `
 SDTM/ADaM ANALYZED:
 N=${stats.nTotal} | Arm TRT=${stats.armSizes.TRT} CTRL=${stats.armSizes.CTRL}
-Age: ${stats.demographics.ageMean}yo | Female: ${stats.demographics.femalePct}%
+Age: ${stats.demographics.ageMean}yo | Female: ${stats.demographics.femalePct}
 SAE: ${stats.safety.seriousAe} (${stats.safety.saeRate}) | Deaths: ${stats.safety.deaths}
 PFS: ${stats.efficacy.pfsMedian}mo (${stats.efficacy.events} events)
 
@@ -624,8 +658,16 @@ Request: ${request}
 Generate ICH E3 CSR 18.2 Synopsis + Table 14.1 using THESE exact numbers.
     `;
     try {
-      const csr = await ai(sys_csr, csrData, apiKey);
-      const composed = `## Table 14.1 Study Population Demographics\n| Characteristic | Treatment (N=${stats.armSizes.TRT}) | Control (N=${stats.armSizes.CTRL}) |\n|----------------|------------------------------------|-----------------------------------|\n| Age (mean)     | ${stats.demographics.ageMean}         | ${stats.demographics.ageMean}        |\n| Female         | ${stats.demographics.femalePct}%      | ${stats.demographics.femalePct}%     |\n\n***AI ANALYZED FROM SDTM/ADaM***\n\n${csr}`;
+      const csr = await ai(sys_csr, csrData);
+      const composed = `## Table 14.1 Study Population Demographics
+| Characteristic | Treatment (N=${stats.armSizes.TRT}) | Control (N=${stats.armSizes.CTRL}) |
+|----------------|------------------------------------|-----------------------------------|
+| Age (mean)     | ${stats.demographics.ageMean}         | ${stats.demographics.ageMean}        |
+| Female         | ${stats.demographics.femalePct}      | ${stats.demographics.femalePct}     |
+
+***AI ANALYZED FROM SDTM/ADaM***
+
+${csr}`;
       setCsrResult(composed);
       setEditableCSR(composed);
       const validation = buildValidationReport({ csrText: composed, stats, ars });
@@ -665,7 +707,6 @@ Generate ICH E3 CSR 18.2 Synopsis + Table 14.1 using THESE exact numbers.
   const handleGenerateSLR = async () => {
     const request = getRequestText(promptText, form);
     if (!request.trim()) return;
-    if (!apiKey) { alert("Please enter an API key first."); return; }
     setSlrLoading(true); setTab("slr");
     setSlrReport("Searching PubMed and synthesizing the systematic literature review...");
     try {
@@ -678,7 +719,7 @@ Generate ICH E3 CSR 18.2 Synopsis + Table 14.1 using THESE exact numbers.
         ids.forEach((id) => { const item = dd?.result?.[id]; if (!item) return; litCtx += `- ${item.title}\n  Journal: ${item.source || ""} | Year: ${(item.pubdate || "").split(" ")[0]}\n\n`; const t = (item.title || "").toLowerCase(); if (/(randomized|randomised|trial)/.test(t)) em.randomized++; else if (/(cohort|case-control|observational|registry)/.test(t)) em.observational++; else if (/(review|meta-analysis|systematic)/.test(t)) em.review++; if (/(efficacy|response|outcome|effect)/.test(t)) em.efficacy++; if (/(safety|adverse|tolerability|ae)/.test(t)) em.safety++; if (/(comparator|placebo|control|standard of care)/.test(t)) em.comparator++; if (/(endpoint|primary|secondary|survival|biomarker)/.test(t)) em.endpoint++; });
       } else litCtx = "No recent articles found. Synthesize based on general medical knowledge.";
       addAudit("SLR", `PubMed: ${ids.length} articles - ${request}`);
-      const text = await ai(sys_slr, `Request: ${request}\n\nLatest PubMed literature:\n${litCtx}`, apiKey);
+      const text = await ai(sys_slr, `Request: ${request}\n\nLatest PubMed literature:\n${litCtx}`);
       setSlrReport(text); setSlrMeta(em); setO("slr", { text, evidenceMap: em });
       addAudit("SLR", "Synthesis complete");
     } catch (err) { console.error(err); setSlrReport(`Error: ${err.message}`); }
@@ -689,7 +730,6 @@ Generate ICH E3 CSR 18.2 Synopsis + Table 14.1 using THESE exact numbers.
   const handleRun = async () => {
     const request = getRequestText(promptText, form);
     if (!request.trim()) return;
-    if (!apiKey) { alert("Please enter an API key in the settings panel."); return; }
     const phase = inferPhase(request, form.phase);
     setStatus("loading"); setAst({}); setOuts({}); setReport(""); setSlrReport(""); setSlrMeta(null); setNerData(null); setCohdData(null); setSqlData(""); setEcData(null); setSgData(null); setRegData(""); setSampleN(null); setFeasibility(null); setCtN(0); setPmN(0); setElapsed(0); setAuditLog([]);
     const ctx = `Request: ${request}`;
@@ -699,24 +739,25 @@ Generate ICH E3 CSR 18.2 Synopsis + Table 14.1 using THESE exact numbers.
     setStatus("running");
     try {
       setTab("trialist"); setA("trialist", "active");
-      const out1 = await ai(sys_trialist, `${ctx}\n\nClinicalTrials.gov:\n${ct.slice(0, 8).map((t) => `- ${t.id} | ${(t.title || "").slice(0, 60)} | Phase ${t.phase} | N ${t.n} | ${t.status} | ${(t.sponsor || "").slice(0, 30)}`).join("\n")}`, apiKey);
+      const out1 = await ai(sys_trialist, `${ctx}\n\nClinicalTrials.gov:\n${ct.slice(0, 8).map((t) => `- ${t.id} | ${(t.title || "").slice(0, 60)} | Phase ${t.phase} | N ${t.n} | ${t.status} | ${(t.sponsor || "").slice(0, 30)}`).join("\n")}`);
       setO("trialist", out1); setA("trialist", "done"); addAudit("trialist", "Competitive landscape complete");
       setTab("clinician"); setA("clinician", "active");
-      const out2 = await ai(sys_clinician, `${ctx}\n\nPubMed:\n${pm.slice(0, 8).map((a) => `- ${(a.title || "").slice(0, 70)} | ${a.source} | ${a.year}`).join("\n")}\n\nRequest:\n${truncate(request, 300)}\n\nTrialist:\n${truncate(out1, 700)}`, apiKey);
+      const out2 = await ai(sys_clinician, `${ctx}\n\nPubMed:\n${pm.slice(0, 8).map((a) => `- ${(a.title || "").slice(0, 70)} | ${a.source} | ${a.year}`).join("\n")}\n\nRequest:\n${truncate(request, 300)}\n\nTrialist:\n${truncate(out1, 700)}`);
       setO("clinician", out2); setA("clinician", "done"); addAudit("clinician", "Evidence synthesis complete");
       setTab("informatician"); setA("informatician", "active");
-      const out3 = await ai(sys_informatician, `${ctx}\n\nProtocol context:\n${truncate(out2, 900)}`, apiKey);
+      const out3 = await ai(sys_informatician, `${ctx}\n\nProtocol context:\n${truncate(out2, 900)}`);
       setO("informatician", out3); setA("informatician", "done"); addAudit("informatician", "OMOP mapping complete");
       setTab("statistician"); setA("statistician", "active");
-      const out4 = await ai(sys_statistician, `${ctx}\n\nClinical specs:\n${truncate(out3, 900)}`, apiKey);
-      setO("statistician", out4); setA("statistician", "done"); const hrMatch = out4.match(/(?:Assumed\s+)?HR[:\s]+([0-9.]+)/i); const hrVal = hrMatch ? parseFloat(hrMatch[1]) : 0.75; const sN = schoenfeldN(hrVal); setSampleN(sN); addAudit("statistician", `N=${sN.total} (HR ${hrVal})`);
+      const out4 = await ai(sys_statistician, `${ctx}\n\nClinical specs:\n${truncate(out3, 900)}`);
+      setO("statistician", out4); setA("statistician", "done");
+      const hrMatch = out4.match(/(?:Assumed\s+)?HR[:\s]+([0-9.]+)/i); const hrVal = hrMatch ? parseFloat(hrMatch[1]) : 0.75; const sN = schoenfeldN(hrVal); setSampleN(sN); addAudit("statistician", `N=${sN.total} (HR ${hrVal})`);
       setTab("ner"); setA("ner", "active"); const ner = await runNER(request); setNerData(ner); setO("ner", ner); setA("ner", "done"); addAudit("ner", `ICD: ${ner.icd.length} | RxNorm: ${ner.rxn.length} | LOINC: ${ner.loinc.length}`);
       setTab("cohd"); setA("cohd", "active"); const cohd = await runCOHD(request); setCohdData(cohd); setO("cohd", cohd); const feas = computeFeasibility(ct.length, pm.length, cohd.totalPts, cohd.matchedPairs); setFeasibility(feas); setA("cohd", "done"); addAudit("cohd", `Cohort: ${cohd.totalPts} pts | Pairs: ${cohd.matchedPairs} | Feasibility: ${feas.total}/100`);
-      setTab("ec"); setA("ec", "active"); const ec = await runECOptimizer(request, out2, apiKey); setEcData(ec); setO("ec", ec); setA("ec", "done"); addAudit("ec", "Shapley EC optimization complete");
-      setTab("subgroup"); setA("subgroup", "active"); const sg = await runSubgroup(request, cohd, out4, apiKey); setSgData(sg); setO("subgroup", sg); setA("subgroup", "done"); addAudit("subgroup", `${sg.subgroups?.length || 0} subgroups analyzed`);
-      setTab("regulatory"); setA("regulatory", "active"); const reg = await runRegulatory(request, phase, out4, sN, apiKey); setRegData(reg); setO("regulatory", reg); setA("regulatory", "done"); addAudit("regulatory", "FDA/EMA strategy complete");
-      const sql = await ai(sys_sql, `${ctx}\n\nCohort spec:\n${truncate(out3, 1000)}`, apiKey); setSqlData(sql); setO("sql", sql);
-      setTab("supervisor"); setA("supervisor", "active"); const rep = await ai(sys_supervisor, `${ctx}\nTrialist:\n${truncate(out1, 500)}\nClinician:\n${truncate(out2, 500)}\nInformatician:\n${truncate(out3, 500)}\nStatistician:\n${truncate(out4, 500)}\nNER: ICD-${ner.icd.map((x) => x.code).join(",")} | RxNorm: ${ner.rxn.map((x) => x.code).join("")}\nCOHD: ${JSON.stringify(cohd).slice(0, 500)}\nEC: ${JSON.stringify(ec).slice(0, 500)}\nSubgroup: ${JSON.stringify(sg).slice(0, 500)}\nRegulatory: ${truncate(reg, 700)}`, apiKey); setReport(rep); setO("supervisor", rep); setA("supervisor", "done"); addAudit("supervisor", "Final protocol synthesis complete"); setStatus("done"); setTimeout(() => repRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
+      setTab("ec"); setA("ec", "active"); const ec = await runECOptimizer(request, out2); setEcData(ec); setO("ec", ec); setA("ec", "done"); addAudit("ec", "Shapley EC optimization complete");
+      setTab("subgroup"); setA("subgroup", "active"); const sg = await runSubgroup(request, cohd, out4); setSgData(sg); setO("subgroup", sg); setA("subgroup", "done"); addAudit("subgroup", `${sg.subgroups?.length || 0} subgroups analyzed`);
+      setTab("regulatory"); setA("regulatory", "active"); const reg = await runRegulatory(request, phase, out4, sN); setRegData(reg); setO("regulatory", reg); setA("regulatory", "done"); addAudit("regulatory", "FDA/EMA strategy complete");
+      const sql = await ai(sys_sql, `${ctx}\n\nCohort spec:\n${truncate(out3, 1000)}`); setSqlData(sql); setO("sql", sql);
+      setTab("supervisor"); setA("supervisor", "active"); const rep = await ai(sys_supervisor, `${ctx}\nTrialist:\n${truncate(out1, 500)}\nClinician:\n${truncate(out2, 500)}\nInformatician:\n${truncate(out3, 500)}\nStatistician:\n${truncate(out4, 500)}\nNER: ICD-${ner.icd.map((x) => x.code).join(",")} | RxNorm: ${ner.rxn.map((x) => x.code).join("")}\nCOHD: ${JSON.stringify(cohd).slice(0, 500)}\nEC: ${JSON.stringify(ec).slice(0, 500)}\nSubgroup: ${JSON.stringify(sg).slice(0, 500)}\nRegulatory: ${truncate(reg, 700)}`); setReport(rep); setO("supervisor", rep); setA("supervisor", "done"); addAudit("supervisor", "Final protocol synthesis complete"); setStatus("done"); setTimeout(() => repRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
     } catch (err) { console.error(err); addAudit("error", err.message); setStatus("idle"); alert("Error: " + err.message); }
   };
 
@@ -726,7 +767,7 @@ Generate ICH E3 CSR 18.2 Synopsis + Table 14.1 using THESE exact numbers.
     const title = shortTitle(request, form.disease || "Indication");
     setPptLoading(true);
     try {
-      const pres = new pptxgen();
+      const pres = new PptxGenJS();
       pres.layout = "LAYOUT_16x9";
       const s1 = pres.addSlide(); s1.background = { color: "1A2B4A" };
       s1.addText("ENTERPRISE-READY CLINICAL TRIAL INTELLIGENCE", { x: 0.7, y: 0.6, w: 4.5, h: 0.25, fontSize: 9, color: "7DD3C8", bold: true, charSpace: 1.2 });
@@ -737,11 +778,11 @@ Generate ICH E3 CSR 18.2 Synopsis + Table 14.1 using THESE exact numbers.
       const s2 = pres.addSlide(); s2.background = { color: "FFFFFF" };
       s2.addText("Executive Summary", { x: 0.45, y: 0.4, w: 8.5, h: 0.4, fontSize: 24, bold: true, color: "0D2B5E" });
       s2.addText([{ text: "Request: ", options: { bold: true } }, { text: `${request || "TBD"}\n` }, { text: "Positioning: ", options: { bold: true } }, { text: "Evidence-driven, feasibility-aware, structured for enterprise and regulatory review.\n" }], { x: 0.45, y: 1.15, w: 8.9, h: 1.8, fontSize: 16, color: "363636", valign: "top" });
-      s2.addTable([["Metric", "Value", "Interpretation"], ["Trials Found", String(ctN), "Competitive density"], ["PubMed Articles", String(pmN), "Evidence base"], ["Feasibility Score", feasibility ? `${feasibility.total}/100` : "TBD", feasibility?.grade || "Pending"], ["Sample Size (N)", sampleN ? `${sampleN.total}` : "TBD", "Schoenfeld-based estimate"], ["Model", "claude-sonnet-4-20250514", "AI engine"]], { x: 0.45, y: 3.1, w: 8.9, h: 2.2, rowH: 0.38, colW: [2.2, 1.8, 4.9], fontSize: 13, color: "1a2b4a", border: { pt: 1, color: "E2E8F0" } });
+      s2.addTable([["Metric", "Value", "Interpretation"], ["Trials Found", String(ctN), "Competitive density"], ["PubMed Articles", String(pmN), "Evidence base"], ["Feasibility Score", feasibility ? `${feasibility.total}/100` : "TBD", feasibility?.grade || "Pending"], ["Sample Size (N)", sampleN ? `${sampleN.total}` : "TBD", "Schoenfeld-based estimate"], ["Model", DEFAULT_MODEL, "AI engine"]], { x: 0.45, y: 3.1, w: 8.9, h: 2.2, rowH: 0.38, colW: [2.2, 1.8, 4.9], fontSize: 13, color: "1a2b4a", border: { pt: 1, color: "E2E8F0" } });
       const s3 = pres.addSlide(); s3.background = { color: "F8FAFC" };
       s3.addText("Evidence Map & Feasibility", { x: 0.45, y: 0.4, w: 8.5, h: 0.4, fontSize: 24, bold: true, color: "0D2B5E" });
       const em = slrMeta || { randomized: 0, observational: 0, review: 0, efficacy: 0, safety: 0, comparator: 0, endpoint: 0 };
-      s3.addTable([["Category", "Count", "Use in Design"], ["Randomized / trial", String(em.randomized || 0), "Highest evidentiary weight"], ["Observational", String(em.observational || 0), "Real-world context"], ["Review / meta-analysis", String(em.review || 0), "Evidence synthesis"], ["Endpoint support", String(em.endpoint || 0), "Primary / secondary endpoint design"], ["Safety support", String(em.safety || 0), "Risk monitoring"], ["Comparator support", String(em.comparator || 0), "Control arm choice"]], { x: 0.45, y: 1.05, w: 4.8, h: 3.5, rowH: 0.38, colW: [2.25, 0.9, 1.65], fontSize: 12, border: { pt: 1, color: "DDE6F0" } });
+      s3.addTable([["Category", "Count", "Use in Design"], ["Randomized / trial", String(em.randomized || 0), "Highest evidentiary weight"], ["Observational", String(em.observational || 0), "Real-world context"], ["Review / meta-analysis", String(em.review || 0), "Evidence synthesis"], ["Endpoint support", String(em.endpoint || 0), "Outcome design"], ["Safety support", String(em.safety || 0), "AE monitoring"], ["Comparator support", String(em.comparator || 0), "Control arm choice"]], { x: 0.45, y: 1.05, w: 4.8, h: 3.5, rowH: 0.38, colW: [2.25, 0.9, 1.65], fontSize: 12, border: { pt: 1, color: "DDE6F0" } });
       s3.addText("Feasibility Engine", { x: 5.55, y: 1.05, w: 3.2, h: 0.25, fontSize: 14, bold: true, color: "1a2b4a" });
       s3.addText([{ text: "Score: ", options: { bold: true } }, { text: `${feasibility ? `${feasibility.total}/100 (${feasibility.grade})` : "TBD"}\n`, options: { bold: true, color: "00a082" } }, { text: "Matched Pairs: ", options: { bold: true } }, { text: `${cohdData?.matchedPairs || "TBD"}\n` }, { text: "COHD HR: ", options: { bold: true } }, { text: `${cohdData?.hr || "TBD"}\n` }, { text: "Balanced covariates: ", options: { bold: true } }, { text: `${cohdData?.cov?.length || 0}\n` }], { x: 5.55, y: 1.35, w: 3.3, h: 2.0, fontSize: 13, color: "363636" });
       const s4 = pres.addSlide(); s4.background = { color: "FFFFFF" };
@@ -759,7 +800,7 @@ Generate ICH E3 CSR 18.2 Synopsis + Table 14.1 using THESE exact numbers.
   const handleExport = () => {
     const request = getRequestText(promptText, form);
     const title = shortTitle(request, form.disease || "Trial");
-    const lines = ["TRIALFORGE AI - CLINICAL TRIAL PROTOCOL EXPORT", "=".repeat(64), `Request: ${request || "TBD"}`, `Generated: ${new Date().toLocaleString()}`, `Model: claude-sonnet-4-20250514`, `Runtime: ${elapsed}s`, `Data: ${ctN} ClinicalTrials.gov | ${pmN} PubMed`, `Sample Size N: ${sampleN?.total || "TBD"} | Per Arm: ${sampleN?.perArm || "TBD"}`, `Feasibility: ${feasibility?.total || "TBD"}/100 (${feasibility?.grade || "TBD"})`, "=".repeat(64), "AUDIT LOG", "=".repeat(64), ...auditLog.map((e) => `[${e.ts}] [${e.agent}] ${e.note}`), "=".repeat(64), "INTEGRATED PROTOCOL", "=".repeat(64), report || slrReport || "No report generated.", "=".repeat(64), "FOR INVESTIGATIONAL PLANNING ONLY.", "Validate all outputs with licensed clinical, statistical, and regulatory experts."];
+    const lines = ["TRIALFORGE AI - CLINICAL TRIAL PROTOCOL EXPORT", "=".repeat(64), `Request: ${request || "TBD"}`, `Generated: ${new Date().toLocaleString()}`, `Model: ${DEFAULT_MODEL}`, `Runtime: ${elapsed}s`, `Data: ${ctN} ClinicalTrials.gov | ${pmN} PubMed`, `Sample Size N: ${sampleN?.total || "TBD"} | Per Arm: ${sampleN?.perArm || "TBD"}`, `Feasibility: ${feasibility?.total || "TBD"}/100 (${feasibility?.grade || "TBD"})`, "=".repeat(64), "AUDIT LOG", "=".repeat(64), ...auditLog.map((e) => `[${e.ts}] [${e.agent}] ${e.note}`), "=".repeat(64), "INTEGRATED PROTOCOL", "=".repeat(64), report || slrReport || "No report generated.", "=".repeat(64), "FOR INVESTIGATIONAL PLANNING ONLY.", "Validate all outputs with licensed clinical, statistical, and regulatory experts."];
     const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/plain" }));
     const a = document.createElement("a"); a.href = url; a.download = `TrialForge_${title.replace(/\s+/g, "_")}_Protocol.txt`; a.click(); URL.revokeObjectURL(url);
   };
@@ -797,24 +838,10 @@ Generate ICH E3 CSR 18.2 Synopsis + Table 14.1 using THESE exact numbers.
               </div>
               <div className="field">
                 <label className="lbl">Trial Summary/Data</label>
-                <textarea
-                  className="inp"
-                  rows="5"
-                  value={trialData}
-                  onChange={(e) => setTrialData(e.target.value)}
-                  placeholder="Paste trial results: N=320, PFS HR=0.68 (0.52-0.89), p=0.004..."
-                />
+                <textarea className="inp" rows="5" value={trialData} onChange={(e) => setTrialData(e.target.value)} placeholder="Paste trial results: N=320, PFS HR=0.68 (0.52-0.89), p=0.004..." />
               </div>
-
-              <div className="field">
-                <label className="lbl">SDTM DM.csv</label>
-                <input type="file" accept=".csv" onChange={(e) => setSdtmFile(e.target.files[0])} className="inp" />
-              </div>
-              <div className="field">
-                <label className="lbl">ADaM ADAE.csv</label>
-                <input type="file" accept=".csv" onChange={(e) => setAdamFile(e.target.files[0])} className="inp" />
-              </div>
-
+              <div className="field"><label className="lbl">SDTM DM.csv</label><input type="file" accept=".csv" onChange={(e) => setSdtmFile(e.target.files[0])} className="inp" /></div>
+              <div className="field"><label className="lbl">ADaM ADAE.csv</label><input type="file" accept=".csv" onChange={(e) => setAdamFile(e.target.files[0])} className="inp" /></div>
               <button className="rbtn" onClick={handleCSR} disabled={!trialData.trim() || loading}>{loading ? "Generating..." : "Generate CSR"}</button>
               <div style={{ height: 8 }} />
               <button className="rbtn" onClick={handleCSRWithData} disabled={!sdtmFile || !adamFile || loading}>{loading ? "Parsing..." : "Parse SDTM/ADaM -> CSR"}</button>
@@ -828,58 +855,12 @@ Generate ICH E3 CSR 18.2 Synopsis + Table 14.1 using THESE exact numbers.
               <button className="rbtn" style={{ background: "#16a34a" }} onClick={approveCSR} disabled={!((editableCSR || csrResult).trim())}>Approve CSR</button>
               <div style={{ height: 8 }} />
               <button className="rbtn" style={{ background: "#6d28d9" }} onClick={exportCSRDocx} disabled={!((editableCSR || csrResult).trim())}>Export CSR (.docx)</button>
-
               {parseError && <div className="disclaim mt-3">{parseError}</div>}
-
-              {csrStats && (
-                <div className="metric-grid mt-4">
-                  <div className="metric-box"><div className="metric-val">{csrStats.nTotal}</div><div className="metric-lbl">Total N</div></div>
-                  <div className="metric-box"><div className="metric-val">{csrStats.armSizes.TRT}</div><div className="metric-lbl">TRT Arm</div></div>
-                  <div className="metric-box"><div className="metric-val">{csrStats.safety.saeRate}</div><div className="metric-lbl">SAE Rate</div></div>
-                </div>
-              )}
-
-              {csrReport && (
-                <div className="code mt-4" style={{ whiteSpace: 'pre-wrap', minHeight: 200 }}>
-                  {csrReport}
-                </div>
-              )}
-
-              {(reviewMode ? (
-                <textarea className="inp" rows="14" style={{ marginTop: 10, whiteSpace: "pre-wrap", fontFamily: "monospace" }} value={editableCSR} onChange={(e) => setEditableCSR(e.target.value)} />
-              ) : csrResult ? (
-                <div className="code" style={{ whiteSpace: 'pre-wrap' }}>{csrResult}</div>
-              ) : null)}
-
-              {validationReport && (
-                <div style={{ marginTop: 12, padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}>
-                  <div className="st" style={{ fontSize: 13, marginBottom: 6 }}>Validation Engine</div>
-                  <div className="metric-grid">
-                    <div className="metric-box"><div className="metric-val" style={{ color: validationReport.score >= 90 ? "#00a082" : validationReport.score >= 75 ? "#3b5bdb" : "#c05621" }}>{validationReport.score}/100</div><div className="metric-lbl">Score</div></div>
-                    <div className="metric-box"><div className="metric-val" style={{ color: "#0d2b5e" }}>{validationReport.passed}/{validationReport.total}</div><div className="metric-lbl">Checks Passed</div></div>
-                    <div className="metric-box"><div className="metric-val" style={{ color: "#6d28d9" }}>{validationReport.grade}</div><div className="metric-lbl">QC Grade</div></div>
-                  </div>
-                  <div style={{ height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden", margin: "10px 0 12px" }}>
-                    <div style={{ height: "100%", width: `${validationReport.score}%`, background: validationReport.score >= 90 ? "#00a082" : validationReport.score >= 75 ? "#3b5bdb" : "#c05621" }} />
-                  </div>
-                  <table className="dt">
-                    <thead><tr><th>Check</th><th>Expected</th><th>Actual</th><th>Status</th></tr></thead>
-                    <tbody>{validationReport.checks.map((c, i) => (<tr key={i}><td>{c.label}</td><td>{String(c.expected)}</td><td>{String(c.actual)}</td><td style={{ fontWeight: 800, color: c.pass ? "#008a76" : "#be123c" }}>{c.pass ? "PASS" : "FAIL"}</td></tr>))}</tbody>
-                  </table>
-                </div>
-              )}
-
-              {arsData && (
-                <div style={{ marginTop: 12 }}>
-                  <div className="st" style={{ fontSize: 13 }}>ARS / Traceability</div>
-                  <div className="code" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(arsData, null, 2)}</div>
-                  <table className="dt">
-                    <thead><tr><th>Check</th><th>Expected</th><th>Actual</th><th>Status</th></tr></thead>
-                    <tbody>{validationChecks.map((v, i) => <tr key={i}><td>{v.label}</td><td>{String(v.expected)}</td><td>{String(v.actual)}</td><td>{v.pass ? "PASS" : "FAIL"}</td></tr>)}</tbody>
-                  </table>
-                </div>
-              )}
-
+              {csrStats && (<div className="metric-grid mt-4"><div className="metric-box"><div className="metric-val">{csrStats.nTotal}</div><div className="metric-lbl">Total N</div></div><div className="metric-box"><div className="metric-val">{csrStats.armSizes.TRT}</div><div className="metric-lbl">TRT Arm</div></div><div className="metric-box"><div className="metric-val">{csrStats.safety.saeRate}</div><div className="metric-lbl">SAE Rate</div></div></div>)}
+              {csrReport && (<div className="code mt-4" style={{ whiteSpace: 'pre-wrap', minHeight: 200 }}>{csrReport}</div>)}
+              {(reviewMode ? (<textarea className="inp" rows="14" style={{ marginTop: 10, whiteSpace: "pre-wrap", fontFamily: "monospace" }} value={editableCSR} onChange={(e) => setEditableCSR(e.target.value)} />) : csrResult ? (<div className="code" style={{ whiteSpace: 'pre-wrap' }}>{csrResult}</div>) : null)}
+              {validationReport && (<div style={{ marginTop: 12, padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}><div className="st" style={{ fontSize: 13, marginBottom: 6 }}>Validation Engine</div><div className="metric-grid"><div className="metric-box"><div className="metric-val" style={{ color: validationReport.score >= 90 ? "#00a082" : validationReport.score >= 75 ? "#3b5bdb" : "#c05621" }}>{validationReport.score}/100</div><div className="metric-lbl">Score</div></div><div className="metric-box"><div className="metric-val" style={{ color: "#0d2b5e" }}>{validationReport.passed}/{validationReport.total}</div><div className="metric-lbl">Checks Passed</div></div><div className="metric-box"><div className="metric-val" style={{ color: "#6d28d9" }}>{validationReport.grade}</div><div className="metric-lbl">QC Grade</div></div></div><div style={{ height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden", margin: "10px 0 12px" }}><div style={{ height: "100%", width: `${validationReport.score}%`, background: validationReport.score >= 90 ? "#00a082" : validationReport.score >= 75 ? "#3b5bdb" : "#c05621" }} /></div><table className="dt"><thead><tr><th>Check</th><th>Expected</th><th>Actual</th><th>Status</th></tr></thead><tbody>{validationReport.checks.map((c, i) => (<tr key={i}><td>{c.label}</td><td>{String(c.expected)}</td><td>{String(c.actual)}</td><td style={{ fontWeight: 800, color: c.pass ? "#008a76" : "#be123c" }}>{c.pass ? "PASS" : "FAIL"}</td></tr>))}</tbody></table></div>)}
+              {arsData && (<div style={{ marginTop: 12 }}><div className="st" style={{ fontSize: 13 }}>ARS / Traceability</div><div className="code" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(arsData, null, 2)}</div><table className="dt"><thead><tr><th>Check</th><th>Expected</th><th>Actual</th><th>Status</th></tr></thead><tbody>{validationChecks.map((v, i) => <tr key={i}><td>{v.label}</td><td>{String(v.expected)}</td><td>{String(v.actual)}</td><td>{v.pass ? "PASS" : "FAIL"}</td></tr>)}</tbody></table></div>)}
               <div className="disclaim">Warning: For investigational planning only. Not a substitute for licensed clinical, statistical, or regulatory expertise.</div>
             </div>
           </div>
@@ -887,15 +868,14 @@ Generate ICH E3 CSR 18.2 Synopsis + Table 14.1 using THESE exact numbers.
       )}
 
       <div className="foot">
-        TrialForge AI | claude-sonnet-4-20250514 | ClinicalTrials.gov | PubMed | COHD | OMOP CDM<br />
+        TrialForge AI | {DEFAULT_MODEL} | ClinicalTrials.gov | PubMed | COHD | OMOP CDM<br />
         For investigational planning only. All outputs require validation by licensed clinical, statistical, and regulatory experts.
       </div>
     </div>);
   };
 
-  return (<div className="app"><div className="nav"><div className="nav-in"><div className="logo">TrialForge <span className="logo-t">AI</span> <span className="badge">10 AGENT</span></div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button className="nbtn ng" onClick={handleExport} disabled={!report && !slrReport}>Export Protocol</button><button className="nbtn ng" onClick={handleGenerateSLR} disabled={slrLoading || status === "loading" || status === "running"}>{slrLoading ? "Synthesizing..." : "Generate SLR"}</button><button className="nbtn np" onClick={handleRun} disabled={status === "loading" || status === "running"}>{status === "loading" || status === "running" ? "Running..." : "Generate Protocol"}</button></div></div></div><div className="hero"><div className="hero-in"><div className="hero-eye">Clinical Trial Intelligence Platform</div><div className="hero-h">From evidence synthesis to protocol generation, feasibility scoring, cohort discovery, SLR generation, and investor-ready outputs.</div><div className="hero-t">Multi-agent clinical trial design: ClinicalTrials.gov benchmarks, PubMed synthesis, OMOP mapping, Shapley eligibility optimization, subgroup HTE, regulatory strategy, evidence map generation, pitch deck export.</div><div className="hero-stats"><div><div className="sv">{ctN}</div><div className="sl">ClinicalTrials.gov Trials</div></div><div><div className="sv">{pmN}</div><div className="sl">PubMed Articles</div></div><div><div className="sv">{elapsed}s</div><div className="sl">Runtime</div></div><div><div className="sv">{Object.values(ast).filter((x) => x === "done").length}/10</div><div className="sl">Agents Complete</div></div></div></div></div><div className="main"><div className="grid"><div className="card"><div className="ch"><div><div className="cht">Trial Setup</div><div className="chs">Describe what you want the platform to build</div></div><SBadge s={status === "running" || status === "loading" ? "active" : status} /></div><div className="cb">{!keySaved ? (<div className="key-banner"><strong>Warning: API key required.</strong> Stored in memory only - never persisted.<br />In production, remove this panel and use the <code>/api/claude</code> proxy.<div className="key-row"><input className="key-inp" type="password" placeholder="sk-ant-..." value={keyInput} onChange={(e) => setKeyInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSaveKey()} /><button className="key-btn" onClick={handleSaveKey}>Save</button></div></div>) : (<div style={{ fontSize: 10, color: "#008a76", background: "#f0fdf9", border: "1px solid #b2ece3", borderRadius: 8, padding: "6px 10px", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}><span>API key loaded</span><button style={{ fontSize: 10, color: "#718096", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setApiKey(""); setKeySaved(false); }}>change</button></div>)}<div className="field"><label className="lbl">What do you want to build?</label><textarea className="inp" value={promptText} onChange={(e) => setPromptText(e.target.value)} placeholder="Describe the trial, CSR, SQL, cohort, or evidence question you want the platform to solve..." rows="6" /></div><div style={{ fontSize: 10, color: "#718096", lineHeight: 1.5, marginBottom: 12 }}>Examples: Design a Phase 2 trial for metastatic NSCLC after PD-1 failure. Generate a CSR from SDTM/ADaM. Build SQL for a breast cancer cohort.</div><button className="rbtn" onClick={handleRun} disabled={status === "loading" || status === "running"}>{status === "loading" || status === "running" ? "Generating..." : "Generate Protocol"}</button><div style={{ height: 8 }} /><button className="rbtn" style={{ background: "#4a5568" }} onClick={handleGenerateSLR} disabled={slrLoading || status === "loading" || status === "running"}>{slrLoading ? "Synthesizing..." : "Generate SLR & Evidence Map"}</button><div style={{ height: 8 }} /><button className="rbtn" style={{ background: "#0d2b5e" }} onClick={handleExportPPT} disabled={pptLoading || status === "loading" || status === "running"}>{pptLoading ? "Building Deck..." : "Export Pitch Deck (.pptx)"}</button><div style={{ height: 8 }} /><button className="rbtn" style={{ background: "#718096" }} onClick={handleExport} disabled={!report && !slrReport}>Export Protocol (.txt)</button><div style={{ height: 8 }} /><button className="rbtn" onClick={() => setShowCSR(!showCSR)}>{showCSR ? "Back" : "CSR Tables from CSV"}</button>
-
-<div className="disclaim">Warning: For investigational planning only. Not a substitute for licensed clinical, statistical, or regulatory expertise.</div></div><div className="ch" style={{ borderTop: "1px solid #edf2f7" }}><div><div className="cht">Agent Pipeline</div><div className="chs">Sequential intelligence</div></div></div><div className="cb">{AGENTS.map(([id, nm, ds]) => (<div key={id} className={`ard ${tab === id ? "sel" : ""} ${ast[id] === "done" ? "done" : ""}`} onClick={() => setTab(id)}><div className="ai" style={{ background: tab === id ? "#eff4ff" : "#f8fafc", color: "#0d2b5e" }}>{nm[0]}</div><div style={{ flex: 1 }}><div className="an">{nm}</div><div className="ad">{ds}</div></div><SBadge s={ast[id] === "active" ? "active" : ast[id] === "done" ? "done" : "idle"} /></div>))}</div></div><div className="card" ref={repRef}><div className="tabs">{AGENTS.map(([id, nm]) => (<button key={id} className={`tab ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}>{nm}</button>))}</div>{status === "idle" && !report && !slrReport && (<div className="con"><div className="st">Ready to analyze</div><div className="sm">Describe what you want to build, then run the pipeline or generate the SLR.</div></div>)}{renderTabContent()}</div></div><div className="foot">TrialForge AI | claude-sonnet-4-20250514 | ClinicalTrials.gov | PubMed | COHD | OMOP CDM<br />For investigational planning only. All outputs require validation by licensed clinical, statistical, and regulatory experts.</div></div></div>);
+  return (<div className="app"><div className="nav"><div className="nav-in"><div className="logo">TrialForge <span className="logo-t">AI</span> <span className="badge">10 AGENT</span></div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button className="nbtn ng" onClick={handleExport} disabled={!report && !slrReport}>Export Protocol</button><button className="nbtn ng" onClick={handleGenerateSLR} disabled={slrLoading || status === "loading" || status === "running"}>{slrLoading ? "Synthesizing..." : "Generate SLR"}</button><button className="nbtn np" onClick={handleRun} disabled={status === "loading" || status === "running"}>{status === "loading" || status === "running" ? "Running..." : "Generate Protocol"}</button></div></div></div><div className="hero"><div className="hero-in"><div className="hero-eye">Clinical Trial Intelligence Platform</div><div className="hero-h">From evidence synthesis to protocol generation, feasibility scoring, cohort discovery, SLR generation, and investor-ready outputs.</div><div className="hero-t">Multi-agent clinical trial design: ClinicalTrials.gov benchmarks, PubMed synthesis, OMOP mapping, Shapley eligibility optimization, subgroup HTE, regulatory strategy, evidence map generation, pitch deck export.</div><div className="hero-stats"><div><div className="sv">{ctN}</div><div className="sl">ClinicalTrials.gov Trials</div></div><div><div className="sv">{pmN}</div><div className="sl">PubMed Articles</div></div><div><div className="sv">{elapsed}s</div><div className="sl">Runtime</div></div><div><div className="sv">{Object.values(ast).filter((x) => x === "done").length}/10</div><div className="sl">Agents Complete</div></div></div></div></div><div className="main"><div className="grid"><div className="card"><div className="ch"><div><div className="cht">Trial Setup</div><div className="chs">Describe what you want the platform to build</div></div><SBadge s={status === "running" || status === "loading" ? "active" : status} /></div><div className="cb">{!keySaved ? (<div className="key-banner"><strong>Optional API key.</strong> The app now uses the server proxy route by default: <code>/api/claude</code>.<br />You can still save a key for local testing if you want.<div className="key-row"><input className="key-inp" type="password" placeholder="sk-ant-..." value={keyInput} onChange={(e) => setKeyInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSaveKey()} /><button className="key-btn" onClick={handleSaveKey}>Save</button></div></div>) : (<div style={{ fontSize: 10, color: "#008a76", background: "#f0fdf9", border: "1px solid #b2ece3", borderRadius: 8, padding: "6px 10px", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}><span>Proxy route ready</span><button style={{ fontSize: 10, color: "#718096", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setApiKey(""); setKeySaved(false); }}>change</button></div>)}<div className="field"><label className="lbl">What do you want to build?</label><textarea className="inp" value={promptText} onChange={(e) => setPromptText(e.target.value)} placeholder="Describe the trial, CSR, SQL, cohort, or evidence question you want the platform to solve..." rows="6" /></div><div style={{ fontSize: 10, color: "#718096", lineHeight: 1.5, marginBottom: 12 }}>Examples: Design a Phase 2 trial for metastatic NSCLC after PD-1 failure. Generate a CSR from SDTM/ADaM. Build SQL for a breast cancer cohort.</div><button className="rbtn" onClick={handleRun} disabled={status === "loading" || status === "running"}>{status === "loading" || status === "running" ? "Generating..." : "Generate Protocol"}</button><div style={{ height: 8 }} /><button className="rbtn" style={{ background: "#4a5568" }} onClick={handleGenerateSLR} disabled={slrLoading || status === "loading" || status === "running"}>{slrLoading ? "Synthesizing..." : "Generate SLR & Evidence Map"}</button><div style={{ height: 8 }} /><button className="rbtn" style={{ background: "#0d2b5e" }} onClick={handleExportPPT} disabled={pptLoading || status === "loading" || status === "running"}>{pptLoading ? "Building Deck..." : "Export Pitch Deck (.pptx)"}</button><div style={{ height: 8 }} /><button className="rbtn" style={{ background: "#718096" }} onClick={handleExport} disabled={!report && !slrReport}>Export Protocol (.txt)</button><div style={{ height: 8 }} /><button className="rbtn" onClick={() => setShowCSR(!showCSR)}>{showCSR ? "Back" : "CSR Tables from CSV"}</button>
+<div className="disclaim">Warning: For investigational planning only. Not a substitute for licensed clinical, statistical, or regulatory expertise.</div></div><div className="ch" style={{ borderTop: "1px solid #edf2f7" }}><div><div className="cht">Agent Pipeline</div><div className="chs">Sequential intelligence</div></div></div><div className="cb">{AGENTS.map(([id, nm, ds]) => (<div key={id} className={`ard ${tab === id ? "sel" : ""} ${ast[id] === "done" ? "done" : ""}`} onClick={() => setTab(id)}><div className="ai" style={{ background: tab === id ? "#eff4ff" : "#f8fafc", color: "#0d2b5e" }}>{nm[0]}</div><div style={{ flex: 1 }}><div className="an">{nm}</div><div className="ad">{ds}</div></div><SBadge s={ast[id] === "active" ? "active" : ast[id] === "done" ? "done" : "idle"} /></div>))}</div></div><div className="card" ref={repRef}><div className="tabs">{AGENTS.map(([id, nm]) => (<button key={id} className={`tab ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}>{nm}</button>))}</div>{status === "idle" && !report && !slrReport && (<div className="con"><div className="st">Ready to analyze</div><div className="sm">Describe what you want to build, then run the pipeline or generate the SLR.</div></div>)}{renderTabContent()}</div></div><div className="foot">TrialForge AI | {DEFAULT_MODEL} | ClinicalTrials.gov | PubMed | COHD | OMOP CDM<br />For investigational planning only. All outputs require validation by licensed clinical, statistical, and regulatory experts.</div></div></div>);
 }
 
 export default App;
