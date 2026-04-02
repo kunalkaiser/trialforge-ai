@@ -4,7 +4,9 @@ import { saveAs } from "file-saver";
 import PptxGenJS from "pptxgenjs";
 
 const ENV_KEY = process.env.REACT_APP_ANTHROPIC_API_KEY || "";
-const PROXY_URL = process.env.REACT_APP_PROXY_URL || "/api/claude";
+// Point this to your actual Vercel backend URL if it's hosted separately
+const VERCEL_BACKEND_URL = process.env.REACT_APP_VERCEL_URL || "https://your-awesome-backend.vercel.app"; 
+const PROXY_URL = `${VERCEL_BACKEND_URL}/api/claude`; // Adjust the route if your Vercel endpoint is named differently
 const DEFAULT_MODEL = "claude-sonnet-4-20250514";
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
