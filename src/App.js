@@ -491,21 +491,17 @@ function extractAiContent(payload) {
 }
 async function ai(sys, usr) {
   try {
-    // Check if we have a key. If yes, go direct to Anthropic.
-   const activeKey = apiKey || ENV_KEY || "YOUR_ACTUAL_KEY_HERE"; 
-const url = "https://api.anthropic.com/v1/messages";
-const hasKey = true; // We are forcing it to go direct
-    
+    // 1. We use the variables from .env or the UI box (No hardcoded sk-ant keys!)
+    const activeKey = apiKey || ENV_KEY; 
+    const url = "https://api.anthropic.com/v1/messages";
+
     const headers = {
       "Content-Type": "application/json",
-      "Accept": "application/json"
+      "Accept": "application/json",
+      "x-api-key": activeKey, // This connects the variable to the actual request
+      "anthropic-version": "2023-06-01",
+      "dangerouslyAllowBrowser": "true" 
     };
-
-    if (hasKey) {
-      headers["x-api-key"] = apiKey || ENV_KEY;
-      headers["anthropic-version"] = "2023-06-01";
-      headers["dangerouslyAllowBrowser"] = "true"; 
-    }
 
     const res = await fetch(url, {
       method: "POST",
@@ -518,6 +514,16 @@ const hasKey = true; // We are forcing it to go direct
       }),
     });
 
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Status ${res.status}: ${text.substring(0, 200)}`);
+
+    const parsed = JSON.parse(text);
+    return extractAiContent(parsed);
+  } catch (error) {
+    console.error("AI Fetch Error:", error);
+    return `Error: ${error.message}. Ensure your CORS extension is ON.`;
+  }
+}
     const text = await res.text();
     if (!res.ok) throw new Error(`Status ${res.status}: ${text.substring(0, 200)}`);
 
