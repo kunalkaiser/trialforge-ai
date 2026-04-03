@@ -430,22 +430,17 @@ function buildValidationReport({ csrText, stats, ars }) {
 // ─── External data fetchers ───────────────────────────────────────────────────
 async function fetchCT(queryText) {
   try {
-    // 1. Clean the input
-    const cleanQuery = queryText.replace(/[./]/g, ""); 
+    const url = `https://clinicaltrials.gov/api/v2/studies?query.term=${encodeURIComponent(queryText)}&pageSize=12`;
 
-    // 2. Build the query string using the correct variable (queryText)
-    const query = `query=${encodeURIComponent(cleanQuery)}&pageSize=12&format=json`;
-    
-    // 3. The Fetch
-    const res = await fetch(`https://clinicaltrials.gov/api/v2/studies?${query}`);
-    
+    const res = await fetch(url);
+
     if (!res.ok) {
-        throw new Error(`CT.gov returned status ${res.status}`);
+      throw new Error(`ClinicalTrials.gov returned ${res.status}`);
     }
-    
+
     const data = await res.json();
-    
-    // 4. Map the data to your UI format
+    console.log("Trials found:", data.studies?.length ?? 0);
+
     return (data.studies || []).map((s) => {
       const p = s.protocolSection || {};
       return {
@@ -457,8 +452,8 @@ async function fetchCT(queryText) {
         sponsor: p.sponsorCollaboratorsModule?.leadSponsor?.name,
       };
     });
-  } catch (error) {
-    console.error("ClinicalTrials.gov Fetch Error:", error);
+  } catch (err) {
+    console.error("ClinicalTrials.gov Fetch Error:", err);
     return [];
   }
 }
@@ -508,7 +503,6 @@ function extractAiContent(payload) {
       "Content-Type": "application/json",
       "x-api-key": activeKey,
       "anthropic-version": "2023-06-01",
-      "dangerouslyAllowBrowser": "true"
     };
 
     const res = await fetch(url, {
@@ -944,13 +938,8 @@ ${csr}`;
         <div className="grid">
           {/* LEFT COLUMN: Setup & Pipeline */}
           <div className="card">
-            {showCSR ? (
-              <div className="cb">
-                <div className="cht" style={{ marginBottom: 15 }}>CSR Table Generator</div>
-                <div className="sm" style={{ marginBottom: 20 }}>Upload SDTM/ADaM datasets to generate clinical study report tables.</div>
-                {/* Your CSV upload logic component would go here */}
-                <button className="rbtn" onClick={() => setShowCSR(false)}>Back to Protocol Design</button>
-              </div>
+  {showCSR ? <CSRPanel /> : renderTabContent()}
+</div>
             ) : (
               <>
                 <div className="ch">
