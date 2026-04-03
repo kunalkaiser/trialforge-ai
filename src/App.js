@@ -492,18 +492,20 @@ function extractAiContent(payload) {
   return payload?.output_text || payload?.completion || payload?.text || payload?.message || payload?.result || "";
 }
 
-   async function ai(sys, usr) {
-  console.log("AI starting direct call..."); // Add this to see it in console
-  try {
-    const activeKey = apiKey || ENV_KEY; 
-    const url = "https://api.anthropic.com/v1/messages"; // FORCED direct url
+  async function ai(sys, usr) {
+  try { // <--- MAKE SURE THIS IS HERE
+    const url = "https://api.anthropic.com/v1/messages"; 
+    const activeKey = apiKey || ENV_KEY;
+    
+    if (!activeKey) {
+      return "Error: No API Key found. Please enter it in the UI or .env file.";
+    }
 
     const headers = {
       "Content-Type": "application/json",
-      "Accept": "application/json",
-      "x-api-key": activeKey, 
+      "x-api-key": activeKey,
       "anthropic-version": "2023-06-01",
-      "dangerouslyAllowBrowser": "true" 
+      "dangerouslyAllowBrowser": "true"
     };
 
     const res = await fetch(url, {
@@ -522,7 +524,7 @@ function extractAiContent(payload) {
 
     const parsed = JSON.parse(text);
     return extractAiContent(parsed);
-  } catch (error) {
+  } catch (error) { // This catch now has its matching try!
     console.error("AI Direct Fetch Error:", error);
     return `Error: ${error.message}. Make sure CORS extension is active.`;
   }
