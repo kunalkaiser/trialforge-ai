@@ -428,6 +428,11 @@ async function fetchCT(queryText) {
   try {
     const q = new URLSearchParams({ query: queryText, pageSize: "12", format: "json" });
     const res = await fetch(`https://clinicaltrials.gov/api/v2/studies?${q}`);
+    
+    if (!res.ok) {
+        throw new Error(`CT.gov returned status ${res.status}`);
+    }
+    
     const data = await res.json();
     return (data.studies || []).map((s) => {
       const p = s.protocolSection || {};
@@ -440,7 +445,10 @@ async function fetchCT(queryText) {
         sponsor: p.sponsorCollaboratorsModule?.leadSponsor?.name,
       };
     });
-  } catch {
+  } catch (error) {
+    console.error("ClinicalTrials.gov Fetch Error:", error);
+    // If you keep getting CORS errors in your console, you may need to 
+    // create a new route on your Vercel backend to proxy this fetch too!
     return [];
   }
 }
