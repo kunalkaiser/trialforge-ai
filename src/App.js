@@ -492,8 +492,9 @@ function extractAiContent(payload) {
 async function ai(sys, usr) {
   try {
     // Check if we have a key. If yes, go direct to Anthropic.
-    const hasKey = !!(apiKey || ENV_KEY);
-    const url = hasKey ? "https://api.anthropic.com/v1/messages" : PROXY_URL;
+   const activeKey = apiKey || ENV_KEY || "YOUR_ACTUAL_KEY_HERE"; 
+const url = "https://api.anthropic.com/v1/messages";
+const hasKey = true; // We are forcing it to go direct
     
     const headers = {
       "Content-Type": "application/json",
