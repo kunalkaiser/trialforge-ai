@@ -425,7 +425,8 @@ function buildValidationReport({ csrText, stats, ars }) {
 // ─── External data fetchers ───────────────────────────────────────────────────
 async function fetchCT(queryText) {
   try {
-    const q = new URLSearchParams({ query: queryText, pageSize: "12", format: "json" });
+    const cleanQuery = queryText.replace(/[./]/g, ""); // Removes dots and slashes
+const q = new URLSearchParams({ query: cleanQuery, pageSize: "12", format: "json" });
     const res = await fetch(`https://clinicaltrials.gov/api/v2/studies?${q}`);
     
     if (!res.ok) {
