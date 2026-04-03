@@ -485,30 +485,40 @@ function extractAiContent(payload) {
 }
 async function ai(sys, usr) {
   try {
-    const res = await fetch(PROXY_URL, {
+    // Check if we have a key. If yes, go direct to Anthropic.
+    const hasKey = !!(apiKey || ENV_KEY);
+    const url = hasKey ? "https://api.anthropic.com/v1/messages" : PROXY_URL;
+    
+    const headers = {
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+    };
+
+    if (hasKey) {
+      headers["x-api-key"] = apiKey || ENV_KEY;
+      headers["anthropic-version"] = "2023-06-01";
+      headers["dangerouslyAllowBrowser"] = "true"; 
+    }
+
+    const res = await fetch(url, {
       method: "POST",
-      headers: { 
-        "Content-Type": "application/json", 
-        "Accept": "application/json" 
-      },
+      headers: headers,
       body: JSON.stringify({
         model: DEFAULT_MODEL,
         max_tokens: 3000,
         system: sys,
-        prompt: usr,
         messages: [{ role: "user", content: usr }],
       }),
     });
-    
+
     const text = await res.text();
-    if (!res.ok) throw new Error(`Backend error ${res.status}: ${truncate(text, 300)}`);
-    
-    const parsed = safeJsonParse(text, null);
-    return parsed ? extractAiContent(parsed) : text;
+    if (!res.ok) throw new Error(`Status ${res.status}: ${text.substring(0, 200)}`);
+
+    const parsed = JSON.parse(text);
+    return extractAiContent(parsed);
   } catch (error) {
-    console.error("AI Proxy Fetch Error:", error);
-    // Returning a fallback string prevents the UI from totally breaking if the API fails
-    return `Error communicating with AI backend: ${error.message}`; 
+    console.error("AI Fetch Error:", error);
+    return `Error: ${error.message}. Check your API Key in .env`;
   }
 }
 
