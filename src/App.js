@@ -432,7 +432,9 @@ async function fetchCT(queryText) {
   try {
     const cleanQuery = queryText.replace(/[./]/g, ""); // Removes dots and slashes
 const q = new URLSearchParams({ query: cleanQuery, pageSize: "12", format: "json" });
-    const res = await fetch(`https://clinicaltrials.gov/api/v2/studies?${q}`);
+   
+const query = `query=${encodeURIComponent(searchTerm)}&pageSize=12&format=json`;
+const res = await fetch(`https://clinicaltrials.gov/api/v2/studies?${query}`);
     
     if (!res.ok) {
         throw new Error(`CT.gov returned status ${res.status}`);
@@ -489,16 +491,17 @@ function extractAiContent(payload) {
   if (Array.isArray(choiceContent)) return choiceContent.map((part) => (typeof part === "string" ? part : (part?.text || ""))).join("");
   return payload?.output_text || payload?.completion || payload?.text || payload?.message || payload?.result || "";
 }
-async function ai(sys, usr) {
+
+   async function ai(sys, usr) {
+  console.log("AI starting direct call..."); // Add this to see it in console
   try {
-    // 1. We use the variables from .env or the UI box (No hardcoded sk-ant keys!)
     const activeKey = apiKey || ENV_KEY; 
-    const url = "https://api.anthropic.com/v1/messages";
+    const url = "https://api.anthropic.com/v1/messages"; // FORCED direct url
 
     const headers = {
       "Content-Type": "application/json",
       "Accept": "application/json",
-      "x-api-key": activeKey, // This connects the variable to the actual request
+      "x-api-key": activeKey, 
       "anthropic-version": "2023-06-01",
       "dangerouslyAllowBrowser": "true" 
     };
@@ -520,18 +523,8 @@ async function ai(sys, usr) {
     const parsed = JSON.parse(text);
     return extractAiContent(parsed);
   } catch (error) {
-    console.error("AI Fetch Error:", error);
-    return `Error: ${error.message}. Ensure your CORS extension is ON.`;
-  }
-}
-    const text = await res.text();
-    if (!res.ok) throw new Error(`Status ${res.status}: ${text.substring(0, 200)}`);
-
-    const parsed = JSON.parse(text);
-    return extractAiContent(parsed);
-  } catch (error) {
-    console.error("AI Fetch Error:", error);
-    return `Error: ${error.message}. Check your API Key in .env`;
+    console.error("AI Direct Fetch Error:", error);
+    return `Error: ${error.message}. Make sure CORS extension is active.`;
   }
 }
 
