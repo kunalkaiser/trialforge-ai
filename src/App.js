@@ -2,10 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { Document, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
 import PptxGenJS from "pptxgenjs";
-
-const ENV_KEY = process.env.REACT_APP_ANTHROPIC_API_KEY || "";
+const ENV_KEY = process.env.REACT_APP_CLAUDE_API_KEY || "";
 // Point this to your actual Vercel backend URL if it's hosted separately
-const VERCEL_BACKEND_URL = process.env.REACT_APP_VERCEL_URL || "https://your-awesome-backend.vercel.app"; 
+const VERCEL_BACKEND_URL = ""; // Keep it empty for local relative routes
 const PROXY_URL = `${VERCEL_BACKEND_URL}/api/claude`; // Adjust the route if your Vercel endpoint is named differently
 const DEFAULT_MODEL = "claude-sonnet-4-20250514";
 
@@ -886,17 +885,122 @@ ${csr}`;
             </div>
           </div>
         </div>
-      )}
+); 
+};
 
-      <div className="foot">
-        TrialForge AI | {DEFAULT_MODEL} | ClinicalTrials.gov | PubMed | COHD | OMOP CDM<br />
-        For investigational planning only. All outputs require validation by licensed clinical, statistical, and regulatory experts.
+ return (
+    <div className="app" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+      <div className="nav">
+        <div className="nav-in">
+          <div className="logo">TrialForge <span className="logo-t">AI</span> <span className="badge">10 AGENT</span></div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="nbtn ng" onClick={handleExport} disabled={!report && !slrReport}>Export Protocol</button>
+            <button className="nbtn ng" onClick={handleGenerateSLR} disabled={slrLoading || status === "loading" || status === "running"}>
+              {slrLoading ? "Synthesizing..." : "Generate SLR"}
+            </button>
+            <button className="nbtn np" onClick={handleRun} disabled={status === "loading" || status === "running"}>
+              {status === "loading" || status === "running" ? "Running..." : "Generate Protocol"}
+            </button>
+          </div>
+        </div>
       </div>
-    </div>);
-  };
 
-  return (<div className="app"><div className="nav"><div className="nav-in"><div className="logo">TrialForge <span className="logo-t">AI</span> <span className="badge">10 AGENT</span></div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button className="nbtn ng" onClick={handleExport} disabled={!report && !slrReport}>Export Protocol</button><button className="nbtn ng" onClick={handleGenerateSLR} disabled={slrLoading || status === "loading" || status === "running"}>{slrLoading ? "Synthesizing..." : "Generate SLR"}</button><button className="nbtn np" onClick={handleRun} disabled={status === "loading" || status === "running"}>{status === "loading" || status === "running" ? "Running..." : "Generate Protocol"}</button></div></div></div><div className="hero"><div className="hero-in"><div className="hero-eye">Clinical Trial Intelligence Platform</div><div className="hero-h">From evidence synthesis to protocol generation, feasibility scoring, cohort discovery, SLR generation, and investor-ready outputs.</div><div className="hero-t">Multi-agent clinical trial design: ClinicalTrials.gov benchmarks, PubMed synthesis, OMOP mapping, Shapley eligibility optimization, subgroup HTE, regulatory strategy, evidence map generation, pitch deck export.</div><div className="hero-stats"><div><div className="sv">{ctN}</div><div className="sl">ClinicalTrials.gov Trials</div></div><div><div className="sv">{pmN}</div><div className="sl">PubMed Articles</div></div><div><div className="sv">{elapsed}s</div><div className="sl">Runtime</div></div><div><div className="sv">{Object.values(ast).filter((x) => x === "done").length}/10</div><div className="sl">Agents Complete</div></div></div></div></div><div className="main"><div className="grid"><div className="card"><div className="ch"><div><div className="cht">Trial Setup</div><div className="chs">Describe what you want the platform to build</div></div><SBadge s={status === "running" || status === "loading" ? "active" : status} /></div><div className="cb">{!keySaved ? (<div className="key-banner"><strong>Optional API key.</strong> The app now uses the server proxy route by default: <code>/api/claude</code>.<br />You can still save a key for local testing if you want.<div className="key-row"><input className="key-inp" type="password" placeholder="sk-ant-..." value={keyInput} onChange={(e) => setKeyInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSaveKey()} /><button className="key-btn" onClick={handleSaveKey}>Save</button></div></div>) : (<div style={{ fontSize: 10, color: "#008a76", background: "#f0fdf9", border: "1px solid #b2ece3", borderRadius: 8, padding: "6px 10px", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}><span>Proxy route ready</span><button style={{ fontSize: 10, color: "#718096", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setApiKey(""); setKeySaved(false); }}>change</button></div>)}<div className="field"><label className="lbl">What do you want to build?</label><textarea className="inp" value={promptText} onChange={(e) => setPromptText(e.target.value)} placeholder="Describe the trial, CSR, SQL, cohort, or evidence question you want the platform to solve..." rows="6" /></div><div style={{ fontSize: 10, color: "#718096", lineHeight: 1.5, marginBottom: 12 }}>Examples: Design a Phase 2 trial for metastatic NSCLC after PD-1 failure. Generate a CSR from SDTM/ADaM. Build SQL for a breast cancer cohort.</div><button className="rbtn" onClick={handleRun} disabled={status === "loading" || status === "running"}>{status === "loading" || status === "running" ? "Generating..." : "Generate Protocol"}</button><div style={{ height: 8 }} /><button className="rbtn" style={{ background: "#4a5568" }} onClick={handleGenerateSLR} disabled={slrLoading || status === "loading" || status === "running"}>{slrLoading ? "Synthesizing..." : "Generate SLR & Evidence Map"}</button><div style={{ height: 8 }} /><button className="rbtn" style={{ background: "#0d2b5e" }} onClick={handleExportPPT} disabled={pptLoading || status === "loading" || status === "running"}>{pptLoading ? "Building Deck..." : "Export Pitch Deck (.pptx)"}</button><div style={{ height: 8 }} /><button className="rbtn" style={{ background: "#718096" }} onClick={handleExport} disabled={!report && !slrReport}>Export Protocol (.txt)</button><div style={{ height: 8 }} /><button className="rbtn" onClick={() => setShowCSR(!showCSR)}>{showCSR ? "Back" : "CSR Tables from CSV"}</button>
-<div className="disclaim">Warning: For investigational planning only. Not a substitute for licensed clinical, statistical, or regulatory expertise.</div></div><div className="ch" style={{ borderTop: "1px solid #edf2f7" }}><div><div className="cht">Agent Pipeline</div><div className="chs">Sequential intelligence</div></div></div><div className="cb">{AGENTS.map(([id, nm, ds]) => (<div key={id} className={`ard ${tab === id ? "sel" : ""} ${ast[id] === "done" ? "done" : ""}`} onClick={() => setTab(id)}><div className="ai" style={{ background: tab === id ? "#eff4ff" : "#f8fafc", color: "#0d2b5e" }}>{nm[0]}</div><div style={{ flex: 1 }}><div className="an">{nm}</div><div className="ad">{ds}</div></div><SBadge s={ast[id] === "active" ? "active" : ast[id] === "done" ? "done" : "idle"} /></div>))}</div></div><div className="card" ref={repRef}><div className="tabs">{AGENTS.map(([id, nm]) => (<button key={id} className={`tab ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}>{nm}</button>))}</div>{status === "idle" && !report && !slrReport && (<div className="con"><div className="st">Ready to analyze</div><div className="sm">Describe what you want to build, then run the pipeline or generate the SLR.</div></div>)}{renderTabContent()}</div></div><div className="foot">TrialForge AI | {DEFAULT_MODEL} | ClinicalTrials.gov | PubMed | COHD | OMOP CDM<br />For investigational planning only. All outputs require validation by licensed clinical, statistical, and regulatory experts.</div></div></div>);
-}
+      <div className="hero">
+        <div className="hero-in">
+          <div className="hero-eye">Clinical Trial Intelligence Platform</div>
+          <div className="hero-h">From evidence synthesis to protocol generation, feasibility scoring, cohort discovery, SLR generation, and investor-ready outputs.</div>
+          <div className="hero-t">Multi-agent clinical trial design: ClinicalTrials.gov benchmarks, PubMed synthesis, OMOP mapping, Shapley eligibility optimization, subgroup HTE, regulatory strategy, evidence map generation, pitch deck export.</div>
+          <div className="hero-stats">
+            <div><div className="sv">{ctN}</div><div className="sl">ClinicalTrials.gov Trials</div></div>
+            <div><div className="sv">{pmN}</div><div className="sl">PubMed Articles</div></div>
+            <div><div className="sv">{elapsed}s</div><div className="sl">Runtime</div></div>
+            <div><div className="sv">{Object.values(ast).filter((x) => x === "done").length}/10</div><div className="sl">Agents Complete</div></div>
+          </div>
+        </div>
+      </div>
 
-export default App;
+      <div className="main" style={{ flex: 1, paddingBottom: '40px' }}>
+        <div className="grid">
+          {/* LEFT COLUMN: Setup & Pipeline */}
+          <div className="card">
+            {showCSR ? (
+              <div className="cb">
+                <div className="cht" style={{ marginBottom: 15 }}>CSR Table Generator</div>
+                <div className="sm" style={{ marginBottom: 20 }}>Upload SDTM/ADaM datasets to generate clinical study report tables.</div>
+                {/* Your CSV upload logic component would go here */}
+                <button className="rbtn" onClick={() => setShowCSR(false)}>Back to Protocol Design</button>
+              </div>
+            ) : (
+              <>
+                <div className="ch">
+                  <div>
+                    <div className="cht">Trial Setup</div>
+                    <div className="chs">Describe what you want the platform to build</div>
+                  </div>
+                  <SBadge s={status === "running" || status === "loading" ? "active" : status} />
+                </div>
+                <div className="cb">
+                  {!keySaved ? (
+                    <div className="key-banner">
+                      <strong>Optional API key.</strong> The app now uses the server proxy route by default: <code>/api/claude</code>.<br />
+                      <div className="key-row">
+                        <input className="key-inp" type="password" placeholder="sk-ant-..." value={keyInput} onChange={(e) => setKeyInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSaveKey()} />
+                        <button className="key-btn" onClick={handleSaveKey}>Save</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 10, color: "#008a76", background: "#f0fdf9", border: "1px solid #b2ece3", borderRadius: 8, padding: "6px 10px", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span>Proxy route ready</span>
+                      <button style={{ fontSize: 10, color: "#718096", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setApiKey(""); setKeySaved(false); }}>change</button>
+                    </div>
+                  )}
+                  <div className="field">
+                    <label className="lbl">What do you want to build?</label>
+                    <textarea className="inp" value={promptText} onChange={(e) => setPromptText(e.target.value)} placeholder="Describe the trial, CSR, SQL, cohort, or evidence question you want the platform to solve..." rows="6" />
+                  </div>
+                  <button className="rbtn" onClick={handleRun} disabled={status === "loading" || status === "running"}>
+                    {status === "loading" || status === "running" ? "Generating..." : "Generate Protocol"}
+                  </button>
+                  <div style={{ height: 8 }} />
+                  <button className="rbtn" style={{ background: "#4a5568" }} onClick={handleGenerateSLR} disabled={slrLoading || status === "loading" || status === "running"}>
+                    {slrLoading ? "Synthesizing..." : "Generate SLR & Evidence Map"}
+                  </button>
+                  <div style={{ height: 8 }} />
+                  <button className="rbtn" style={{ background: "#0d2b5e" }} onClick={handleExportPPT} disabled={pptLoading || status === "loading" || status === "running"}>
+                    {pptLoading ? "Building Deck..." : "Export Pitch Deck (.pptx)"}
+                  </button>
+                  <div style={{ height: 8 }} />
+                  <button className="rbtn" onClick={() => setShowCSR(true)}>CSR Tables from CSV</button>
+                  <div className="disclaim" style={{ marginTop: 15 }}>Warning: For investigational planning only. Not a substitute for licensed clinical, statistical, or regulatory expertise.</div>
+                </div>
+
+                <div className="ch" style={{ borderTop: "1px solid #edf2f7" }}>
+                  <div><div className="cht">Agent Pipeline</div><div className="chs">Sequential intelligence</div></div>
+                </div>
+                <div className="cb">
+                  {AGENTS.map(([id, nm, ds]) => (
+                    <div key={id} className={`ard ${tab === id ? "sel" : ""} ${ast[id] === "done" ? "done" : ""}`} onClick={() => setTab(id)}>
+                      <div className="ai" style={{ background: tab === id ? "#eff4ff" : "#f8fafc", color: "#0d2b5e" }}>{nm[0]}</div>
+                      <div style={{ flex: 1 }}>
+                        <div className="an">{nm}</div>
+                        <div className="ad">{ds}</div>
+                      </div>
+                      <SBadge s={ast[id] === "active" ? "active" : ast[id] === "done" ? "done" : "idle"} />
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* RIGHT COLUMN: Results Display */}
+          <div className="card" ref={repRef}>
+            <div className="tabs">
+              {AGENTS.map(([id, nm]) => (
+                <button key={id} className={`tab ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}>{nm}</button>
+              ))}
+            </div>
+            {status === "idle" && !report && !slrReport && (
+              <div className="con">
+                <div className="st">Ready to analyze</div>
+                <div className="sm">Describe what you want to build, then run the pipeline or generate the SLR.
