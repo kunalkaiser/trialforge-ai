@@ -430,17 +430,22 @@ function buildValidationReport({ csrText, stats, ars }) {
 // ─── External data fetchers ───────────────────────────────────────────────────
 async function fetchCT(queryText) {
   try {
-    const cleanQuery = queryText.replace(/[./]/g, ""); // Removes dots and slashes
-const q = new URLSearchParams({ query: cleanQuery, pageSize: "12", format: "json" });
-   
-const query = `query=${encodeURIComponent(searchTerm)}&pageSize=12&format=json`;
-const res = await fetch(`https://clinicaltrials.gov/api/v2/studies?${query}`);
+    // 1. Clean the input
+    const cleanQuery = queryText.replace(/[./]/g, ""); 
+
+    // 2. Build the query string using the correct variable (queryText)
+    const query = `query=${encodeURIComponent(cleanQuery)}&pageSize=12&format=json`;
+    
+    // 3. The Fetch
+    const res = await fetch(`https://clinicaltrials.gov/api/v2/studies?${query}`);
     
     if (!res.ok) {
         throw new Error(`CT.gov returned status ${res.status}`);
     }
     
     const data = await res.json();
+    
+    // 4. Map the data to your UI format
     return (data.studies || []).map((s) => {
       const p = s.protocolSection || {};
       return {
@@ -454,8 +459,6 @@ const res = await fetch(`https://clinicaltrials.gov/api/v2/studies?${query}`);
     });
   } catch (error) {
     console.error("ClinicalTrials.gov Fetch Error:", error);
-    // If you keep getting CORS errors in your console, you may need to 
-    // create a new route on your Vercel backend to proxy this fetch too!
     return [];
   }
 }
