@@ -3,9 +3,14 @@ import { Document, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
 import PptxGenJS from "pptxgenjs";
 const ENV_KEY = process.env.REACT_APP_CLAUDE_API_KEY || "";
-// Point this to your actual Vercel backend URL if it's hosted separately
-const VERCEL_BACKEND_URL = ""; // Keep it empty for local relative routes
-const PROXY_URL = `${VERCEL_BACKEND_URL}/api/claude`; // Adjust the route if your Vercel endpoint is named differently
+
+// 1. Define the direct Anthropic URL for local use
+const ANTHROPIC_DIRECT_URL = "https://api.anthropic.com/v1/messages";
+
+// 2. Set the Proxy URL (Only used if no key is present)
+const VERCEL_BACKEND_URL = ""; 
+const PROXY_URL = VERCEL_BACKEND_URL ? `${VERCEL_BACKEND_URL}/api/claude` : "/api/claude";
+
 const DEFAULT_MODEL = "claude-sonnet-4-20250514";
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
