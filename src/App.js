@@ -477,21 +477,32 @@ function extractAiContent(payload) {
   return payload?.output_text || payload?.completion || payload?.text || payload?.message || payload?.result || "";
 }
 async function ai(sys, usr) {
-  const res = await fetch(PROXY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      model: DEFAULT_MODEL,
-      max_tokens: 3000,
-      system: sys,
-      prompt: usr,
-      messages: [{ role: "user", content: usr }],
-    }),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`Proxy error ${res.status}: ${truncate(text, 300)}`);
-  const parsed = safeJsonParse(text, null);
-  return parsed ? extractAiContent(parsed) : text;
+  try {
+    const res = await fetch(PROXY_URL, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json", 
+        "Accept": "application/json" 
+      },
+      body: JSON.stringify({
+        model: DEFAULT_MODEL,
+        max_tokens: 3000,
+        system: sys,
+        prompt: usr,
+        messages: [{ role: "user", content: usr }],
+      }),
+    });
+    
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Backend error ${res.status}: ${truncate(text, 300)}`);
+    
+    const parsed = safeJsonParse(text, null);
+    return parsed ? extractAiContent(parsed) : text;
+  } catch (error) {
+    console.error("AI Proxy Fetch Error:", error);
+    // Returning a fallback string prevents the UI from totally breaking if the API fails
+    return `Error communicating with AI backend: ${error.message}`; 
+  }
 }
 
 // ─── Agent runners ────────────────────────────────────────────────────────────
